@@ -1,0 +1,8 @@
+{
+  "name": "My Christmas World",
+  "description": "Create, decorate, save, and explore your own persistent 3D Christmas wonderland with daily gifts and cinematic winter landscapes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,1392 @@
+# PROJECT: MY CHRISTMAS WORLD
+## Master Product Specification, UX/UI Design System and Technical Implementation Brief
+
+You are the lead product designer, senior frontend engineer, Three.js specialist, game developer, backend architect and QA engineer responsible for building **My Christmas World**.
+
+Your task is to design and implement a complete, functional, premium-quality, browser-based 3D Christmas world-building game.
+
+Do not build a static landing page, a concept mockup, a collection of screenshots, or a non-interactive visual demo. Build a real web application in which users create, decorate, save and revisit their own persistent 3D Christmas worlds.
+
+You are expected to write almost all of the code yourself, organize it into maintainable files, test it, fix errors and explain how to run it.
+
+The application should be designed for eventual public launch, user accounts, cloud persistence, daily rewards, social sharing and a future paid AI video-generation feature.
+
+Build the first production-oriented version with a clear distinction between implemented functionality, temporary prototypes and future features.
+
+---
+
+# 1. PRODUCT VISION
+
+My Christmas World is a digital Christmas universe where every user owns a small piece of snowy land and gradually transforms it into a beautiful, personal Christmas world.
+
+The experience should combine:
+
+- The emotional magic of Christmas.
+- The creativity of a building game.
+- The satisfaction of collecting daily gifts.
+- The freedom to design a personal miniature world.
+- The beauty of a cinematic winter landscape.
+- The motivation to return every day and expand the world.
+- The ability to share beautiful images and, in a later version, cinematic videos on social media.
+
+The application should feel like entering a small, peaceful, magical winter universe.
+
+It should not feel like an ordinary website, an administration dashboard or a children's mobile game.
+
+The visual quality should evoke a premium Christmas film, a high-end miniature architectural visualization and an atmospheric winter diorama.
+
+The user should feel emotionally attached to the world they create.
+
+## Core product promise
+
+“Your own little Christmas world, growing one gift at a time.”
+
+This is a product-design direction, not a requirement to display this sentence permanently in the interface.
+
+## Main product principles
+
+1. The world belongs to the user.
+2. The user has creative freedom.
+3. The world persists between visits.
+4. Daily gifts encourage returning without forcing artificial complexity.
+5. The 3D environment is the central experience.
+6. The interface should remain elegant, calm and intuitive.
+7. The application should work in a modern desktop and mobile browser.
+8. Every major visible control must perform its advertised function.
+
+---
+
+# 2. TECHNICAL ARCHITECTURE
+
+Use a modern, maintainable web stack.
+
+## Frontend
+
+- React.
+- TypeScript with strict type checking.
+- Vite.
+- Three.js.
+- React Three Fiber for integrating Three.js with React.
+- React Three Drei for camera controls, environment helpers, loaders and other appropriate utilities.
+- A lightweight state-management approach. Use React state and context initially; introduce Zustand only if the application complexity justifies it.
+- CSS modules, organized CSS or another consistent styling strategy.
+- Lucide React or an equivalent lightweight icon library.
+
+Use compatible, stable versions of all dependencies. Do not mix incompatible React, React Three Fiber and Three.js versions.
+
+## Backend and cloud
+
+Use Supabase for:
+
+- User authentication.
+- PostgreSQL database.
+- Persistent world saves.
+- Daily gift records.
+- User settings.
+- Cloud synchronization.
+- Secure user-specific access policies using Row Level Security.
+
+Use Supabase Storage only when storing uploaded or generated files is necessary.
+
+The first public-ready version must include real authentication and cloud persistence. Do not leave them as decorative buttons or simulated login screens.
+
+## Hosting and source control
+
+The application should be compatible with:
+
+- GitHub for source control.
+- Vercel or another suitable frontend hosting provider.
+- Supabase as the backend service.
+
+Do not hardcode secrets, API keys or service-role credentials into client-side code.
+
+Use environment variables for configuration.
+
+Provide an `.env.example` file containing placeholder values, never real secrets.
+
+## Architectural requirements
+
+Keep the game engine separate from the interface.
+
+The application must not become one enormous component containing all logic.
+
+Use reusable components and separate modules for:
+
+- World rendering.
+- Camera controls.
+- Landscape generation.
+- Placeable objects.
+- Object selection and movement.
+- Gift collection.
+- Countdown.
+- Authentication.
+- Cloud persistence.
+- Local caching.
+- Image export.
+- Loading and error states.
+
+---
+
+# 3. THE FIRST USER EXPERIENCE
+
+The first experience should be beautiful, welcoming and extremely easy to understand.
+
+## Initial welcome screen
+
+Present the My Christmas World identity against a cinematic winter background.
+
+The scene may include:
+
+- Snow-covered trees.
+- A small distant village.
+- Warm glowing windows.
+- Subtle snowfall.
+- A deep blue winter sky.
+- Soft atmospheric lighting.
+- A restrained amount of Christmas decoration.
+
+The welcome screen must load efficiently and should not require downloading an enormous 3D scene before the user can interact.
+
+Display the product name:
+
+MY CHRISTMAS WORLD
+
+The main call to action is:
+
+“Let the Christmas Begin”
+
+When clicked, transition smoothly into the world-building experience.
+
+Use a subtle fade, cinematic camera movement or another restrained transition. Avoid excessive animations, unnecessary loading sequences and long introductions.
+
+The application should quickly become interactive.
+
+## First-world creation flow
+
+For a first-time user:
+
+1. Show the welcome screen.
+2. The user clicks “Let the Christmas Begin”.
+3. Introduce the idea of creating a personal Christmas world.
+4. Present four initial landscape choices.
+5. The user chooses one landscape.
+6. Generate the corresponding real-time 3D environment.
+7. Show the main world-building interface.
+8. Explain how to rotate the camera, place objects and collect the first gift.
+9. Save the newly created world to the authenticated user's account.
+
+Do not make the user repeat this setup every time they return.
+
+If the user already has a saved world, offer to continue directly into it.
+
+Provide a way to create another world in a later iteration, but prioritize one excellent persistent world per user for the first release.
+
+---
+
+# 4. THE CENTRAL 3D WORLD
+
+The 3D environment is the most important feature of the entire product.
+
+It must be a real interactive Three.js scene, not a static image, background video or fake 3D illustration.
+
+## Camera behavior
+
+Implement a smooth, unrestricted horizontal orbit around the world, covering the full 360 degrees.
+
+The user must be able to:
+
+- Rotate left and right around the entire world.
+- Tilt the camera vertically within sensible limits.
+- Zoom in to inspect decorations.
+- Zoom out to see the entire world.
+- Return to a default camera position.
+- Inspect the environment from different angles.
+
+Use smooth damping and avoid abrupt camera movement.
+
+Prevent the camera from entering the ground or flipping underneath the scene.
+
+Set sensible zoom limits to prevent the user from getting lost or clipping through objects.
+
+Desktop controls:
+
+- Left mouse drag: orbit.
+- Mouse wheel: zoom.
+- Object click: select an object.
+- Ground click: place or reposition an object when the corresponding mode is active.
+
+Mobile controls:
+
+- One-finger drag: orbit.
+- Pinch: zoom.
+- Tap an object: select it.
+- Tap the ground: place or move an object.
+
+Do not allow object-placement mode to make camera rotation unusable. Make the interaction mode clear and provide an easy way to cancel it.
+
+## Ground and terrain
+
+Create a three-dimensional snowy plot with enough room for houses, trees, roads, lights and decorations.
+
+The environment should have:
+
+- A snow-covered ground plane or terrain mesh.
+- Subtle elevation variation where appropriate.
+- Snow materials with convincing roughness and soft highlights.
+- Natural-looking terrain edges.
+- Atmospheric depth.
+- Shadows beneath objects.
+- Optional low snowbanks around the perimeter.
+- A visually coherent scale for all assets.
+
+Avoid a featureless, perfectly flat white plane as the final visual direction.
+
+Use procedural terrain where useful, but organize the implementation so that better terrain meshes and materials can replace the prototype later.
+
+## Lighting and atmosphere
+
+Create a cinematic winter lighting setup.
+
+Use:
+
+- A cool blue-white ambient environment.
+- A directional light representing winter sunlight or moonlight, depending on the selected atmosphere.
+- Soft shadows.
+- Atmospheric fog with carefully tuned distance.
+- Warm emissive window materials.
+- Small warm light sources around lamps and Christmas decorations.
+- A restrained bloom effect only if performance remains acceptable.
+- A high-quality sky or environment map when available.
+- Optional light snowfall.
+
+The lighting must preserve detail in the snow instead of clipping it to pure white.
+
+Warm lights should contrast beautifully with the cool winter environment.
+
+Use post-processing sparingly. The game must remain responsive on ordinary modern laptops and mobile devices.
+
+## Snowfall
+
+Snowfall is optional for the first functional milestone but desirable.
+
+If implemented:
+
+- Use an efficient particle system or instanced geometry.
+- Avoid creating hundreds or thousands of independent React components.
+- Make the snowfall visually subtle.
+- Respect performance and reduced-motion preferences where practical.
+- Keep the snow particles separate from the world-saving model.
+
+---
+
+# 5. FOUR INITIAL LANDSCAPES
+
+The user must be able to select between four genuinely different environments.
+
+Changing the landscape should update the actual 3D scene, not simply change a label or background color.
+
+The world-building interface should make the four options visually understandable before selection.
+
+## Landscape A: Mountain
+
+Create a secluded snowy mountain environment.
+
+Include:
+
+- Snow-covered mountain peaks.
+- Several layers of distant terrain.
+- Pine trees at different elevations.
+- A central buildable snowy area.
+- A winding path or natural clearing.
+- Cool winter lighting.
+- Strong atmospheric depth.
+
+The user should feel that their village is nestled in a remote alpine landscape.
+
+## Landscape B: Village
+
+Create a classic Christmas village.
+
+Include:
+
+- A snowy central clearing.
+- Several small houses with varied proportions.
+- Sloped roofs covered in snow.
+- Warm illuminated windows.
+- Pine trees.
+- Space for roads and decorations.
+- A cozy, welcoming atmosphere.
+
+This should be the default landscape for a new user.
+
+The initial houses and scenery should provide visual interest without filling every available space. The user must still have room to build.
+
+## Landscape C: River
+
+Create a snowy riverside world.
+
+Include:
+
+- A frozen or partially frozen river.
+- Ice with a subtle blue tint.
+- Snowbanks on both sides.
+- A small wooden house.
+- Pine trees.
+- Optional small bridge.
+- Reflections or restrained specular highlights where technically appropriate.
+
+The river must be a visible part of the actual 3D geometry and should remain visually coherent as the camera rotates.
+
+## Landscape D: City
+
+Create a miniature Christmas city.
+
+Include:
+
+- Snow-covered streets or plazas.
+- Several buildings with different heights.
+- Warm illuminated windows.
+- A few taller skyscrapers.
+- Small decorative trees.
+- Street lighting.
+- A distinct urban skyline.
+
+The city should feel like a miniature winter metropolis, not a collection of identical boxes.
+
+## Landscape architecture
+
+Represent the selected landscape as a persistent property of the user's world.
+
+Switching landscapes should update the environment predictably.
+
+Decide and implement how user-placed decorations behave when changing landscape. The preferred behavior is to preserve the user's placed objects whenever possible, repositioning or validating them only when the new terrain makes their previous positions invalid.
+
+Do not silently delete user-created content.
+
+Keep landscape-specific scenery separate from user-created objects.
+
+---
+
+# 6. BUILDING AND PLACING OBJECTS
+
+This is the primary gameplay mechanic.
+
+Users should gradually transform an empty or partially decorated plot into their own Christmas world.
+
+## Initial placeable object collection
+
+Create functional 3D objects for at least these six categories:
+
+1. Christmas tree.
+2. House.
+3. Street lamp.
+4. Gift box.
+5. Snowman.
+6. Christmas train.
+
+Each object must have a consistent scale, appropriate materials and visible interaction feedback.
+
+Use procedural geometry only as a starting point. Organize the code so that detailed GLB or GLTF models can replace the procedural assets without rewriting the entire placement system.
+
+## Christmas tree
+
+The tree should include:
+
+- Layered evergreen branches.
+- A trunk.
+- A small decorative star or glowing topper.
+- Optional ornaments.
+- Optional warm light strings in a later iteration.
+
+## House
+
+The house should include:
+
+- Walls.
+- A sloped roof.
+- Snow on the roof.
+- A door.
+- Illuminated windows.
+- A chimney where appropriate.
+
+## Street lamp
+
+The lamp should include:
+
+- A pole.
+- A lantern or light fixture.
+- Warm emissive material.
+- A small local light when performance permits.
+
+## Gift box
+
+The gift should include:
+
+- A box.
+- A lid or distinct upper surface.
+- Ribbon.
+- A bow.
+- A visually recognizable color scheme.
+
+## Snowman
+
+The snowman should include:
+
+- Three-dimensional snowballs.
+- Eyes.
+- A carrot-shaped nose.
+- Buttons.
+- Optional hat and scarf.
+
+## Train
+
+The train should include:
+
+- A locomotive body.
+- A chimney or front section.
+- Wheels.
+- Optional carriages in a later iteration.
+
+Keep object geometry and materials reusable.
+
+---
+
+# 7. OBJECT PLACEMENT, SELECTION AND EDITING
+
+Every placement action must work in the actual 3D scene.
+
+## Placement workflow
+
+1. The user opens the object panel.
+2. The user chooses an object.
+3. The interface clearly indicates that placement mode is active.
+4. The user clicks or taps a valid position on the snowy ground.
+5. The object appears at the corresponding world coordinates.
+6. The object is selected and visual feedback confirms the placement.
+7. The user can place additional objects or exit placement mode.
+
+Use a raycasting approach or React Three Fiber pointer events to determine the position on the terrain.
+
+Objects must not appear at arbitrary screen coordinates or at unrelated positions.
+
+## Selection
+
+When the user selects an object:
+
+- Display a subtle selection outline, ring or ground marker.
+- Show its object type.
+- Offer relevant editing actions.
+- Keep the selection visually clear without making the world look like a CAD editor.
+
+## Movement
+
+Allow the user to reposition any placed object.
+
+A reliable initial interaction is:
+
+1. Select an object.
+2. Click “Move”.
+3. Click the new position on the ground.
+4. The object moves to that position.
+
+A later improvement may add direct drag-and-drop movement with a ground-constrained pointer.
+
+Never move an object accidentally when the user intended to rotate the camera.
+
+## Rotation
+
+Allow users to rotate selected objects around their vertical axis.
+
+Provide simple rotation controls, such as:
+
+- Rotate left.
+- Rotate right.
+- Reset rotation.
+
+Use sensible increments initially, with optional finer controls later.
+
+## Deletion
+
+Allow users to remove a selected object after an explicit action.
+
+Do not delete an object just because the user clicks the ground or switches modes.
+
+## Placement validation
+
+Keep placed objects inside the buildable area.
+
+Prevent objects from being placed outside the terrain or at impossible coordinates.
+
+If two objects overlap significantly, provide reasonable feedback or allow the user to correct the position. Avoid complex collision restrictions that make creative building frustrating.
+
+The user should have considerable creative freedom.
+
+---
+
+# 8. WORLD STATE AND PERSISTENCE
+
+The world must be represented by structured data rather than saving only a screenshot.
+
+Design a typed data model similar to:
+
+World:
+- id
+- owner_user_id
+- name
+- landscape_type
+- created_at
+- updated_at
+- camera_state
+- world_settings
+
+PlacedObject:
+- id
+- world_id
+- asset_type
+- position_x
+- position_y
+- position_z
+- rotation_x
+- rotation_y
+- rotation_z
+- scale_x
+- scale_y
+- scale_z
+- optional color or customization properties
+- created_at
+
+The implementation may store the placed objects as a JSON array associated with a world if that makes the initial persistence architecture simpler, but it must be validated and designed for future extension.
+
+## Persistence requirements
+
+- Save the user's selected landscape.
+- Save all user-placed objects.
+- Save object positions, rotations and scales.
+- Save relevant customization settings.
+- Restore the saved world after login or refresh.
+- Avoid duplicate saves or conflicting updates.
+- Display clear saving, saved and error states.
+- Provide a recovery strategy for temporary network failures.
+
+Do not save Three.js mesh objects, material instances or other runtime class instances directly.
+
+Serialize only plain data.
+
+Use a debounced save strategy or explicit save actions where appropriate.
+
+For the initial public version, use Supabase as the authoritative cloud persistence layer.
+
+Local storage may be used as a temporary cache or recovery mechanism, but it must not be presented as equivalent to cloud saving.
+
+Do not overwrite a valid cloud save with an empty world during initialization.
+
+---
+
+# 9. AUTHENTICATION AND USER ACCOUNTS
+
+Authentication is required from the first public-ready version.
+
+Implement:
+
+- Sign up.
+- Login.
+- Logout.
+- Password recovery.
+- Loading states.
+- Validation and readable error messages.
+- Authenticated session restoration.
+- User-specific world access.
+
+Use Supabase Auth.
+
+Email and password authentication is acceptable for the first release. Passwordless login may be added later if useful.
+
+When a user first signs in:
+
+1. Check whether they already have a world.
+2. If they do, load it.
+3. If they do not, begin the new-world creation flow.
+4. Save the created world to their account.
+
+Protect user data using Supabase Row Level Security policies.
+
+Users must never be able to read, overwrite or delete another user's private worlds through client-side queries.
+
+Do not trust a user ID supplied by the frontend as the sole authorization mechanism.
+
+Never expose Supabase service-role keys in browser code.
+
+If Supabase credentials are missing, display a clear setup screen or development-mode warning. Do not silently simulate successful cloud saving.
+
+---
+
+# 10. COUNTDOWN TO CHRISTMAS
+
+Display a live countdown to the next Christmas Day, December 25.
+
+Show:
+
+- Days.
+- Hours.
+- Minutes.
+- Seconds where appropriate.
+
+The countdown must update automatically.
+
+Use the correct calendar year and a clearly defined timezone policy. The countdown must not stop at zero or become negative after Christmas Day has passed.
+
+After December 25, automatically count down to the following year's Christmas.
+
+Use a reusable countdown module with tests for date boundaries.
+
+The countdown should be visually elegant and should not dominate the 3D scene.
+
+The interface should also display the next gift availability time when the daily reward system is implemented.
+
+---
+
+# 11. DAILY GIFT SYSTEM
+
+Daily gifts are one of the most important retention mechanics.
+
+The idea is that users return to their world regularly to collect a new decorative object and gradually build a richer environment.
+
+## Gift experience
+
+Display a visually prominent but restrained “Daily Gift” control.
+
+When the user opens it:
+
+- Show an elegant modal.
+- Display the available gift options.
+- Show attractive 3D previews or clear illustrated previews.
+- Let the user choose one reward.
+- Explain what will be added to the world.
+- Confirm the selection.
+
+When a gift is collected:
+
+1. Record the reward.
+2. Add the corresponding object to the user's world.
+3. Save the updated world.
+4. Display a short success animation.
+5. Update the gift status.
+
+The gift should appear in a sensible initial position, with the option to reposition it immediately.
+
+## Daily reward rules
+
+The production implementation must enforce the daily limit on the server or through a trusted database operation.
+
+Do not rely solely on frontend state, browser time or local storage.
+
+Store a unique reward record per user per eligible calendar day, according to a clearly defined timezone policy.
+
+The user must not be able to collect unlimited rewards by refreshing the browser or changing client-side state.
+
+The initial reward pool may include:
+
+- Christmas tree.
+- Gift box.
+- Snowman.
+- Train.
+- Street lamp.
+- Decorative house.
+- Light string.
+- Bench.
+- Christmas market stall.
+- Reindeer decoration.
+
+Start with four or five choices per reward cycle.
+
+Provide enough variation to keep the world-building experience interesting.
+
+For the development environment, provide a clearly identified testing mode that allows the reward flow to be tested without weakening production reward rules.
+
+---
+
+# 12. FUTURE GIFT CATALOG AND PROGRESSION
+
+Design the system so that new objects can be added without rewriting the placement engine.
+
+The asset catalog should eventually support:
+
+- Free objects.
+- Daily gifts.
+- Seasonal objects.
+- Special event objects.
+- Premium objects.
+- Limited-edition decorations.
+
+Do not implement complex monetization before the core game is reliable.
+
+For the initial version, prioritize:
+
+- A useful free object collection.
+- Daily gifts.
+- Persistent user worlds.
+- Smooth building interactions.
+
+The architecture should make future expansion straightforward.
+
+---
+
+# 13. IMAGE EXPORT
+
+Users should be able to export a high-quality image of their world.
+
+The export must capture the actual rendered 3D scene.
+
+It must not simply screenshot the surrounding interface.
+
+## Initial export functionality
+
+Implement:
+
+- Export current view as PNG.
+- A sensible default resolution.
+- A clear download action.
+- A filename such as `my-christmas-world.png`.
+- Error handling if rendering or export fails.
+
+Preserve the intended scene colors and lighting.
+
+Ensure the rendering configuration supports canvas export.
+
+Avoid external textures or assets with cross-origin restrictions that would taint the canvas and break image export.
+
+## Future export options
+
+Design for later support of:
+
+- Landscape image.
+- Square social media image.
+- Vertical image for stories and TikTok covers.
+- Higher-resolution rendering.
+- Optional removal of the interface.
+- User-selected camera composition.
+
+Do not implement a complex export editor until the basic PNG export works reliably.
+
+---
+
+# 14. FUTURE CINEMATIC VIDEO EXPORT
+
+Video generation is a planned premium feature, not a requirement for the initial core milestone.
+
+The long-term objective is to allow users to turn their world into a short, cinematic video suitable for TikTok, Instagram Reels and other social platforms.
+
+A possible flow:
+
+1. The user builds a world.
+2. The user chooses a cinematic camera path.
+3. The user selects a video duration and aspect ratio.
+4. The system renders a sequence of camera movements.
+5. A secure backend processes the render.
+6. The finished video is made available for download.
+
+Future options may include:
+
+- Slow cinematic orbit.
+- Flyover of the village.
+- Close-ups of selected decorations.
+- Warm nighttime lighting.
+- Falling snow.
+- Christmas music where properly licensed.
+- Vertical 9:16 output.
+- Horizontal 16:9 output.
+
+AI-generated video services may be integrated later, subject to API access, cost, latency, terms and technical feasibility.
+
+Do not expose paid AI API keys in the browser.
+
+Do not pretend a video has been generated when only a static image or preview has been created.
+
+For the first release, focus on the 3D world and PNG export.
+
+---
+
+# 15. PREMIUM VISUAL DESIGN SYSTEM
+
+The design must be beautiful enough to feel like a real consumer product.
+
+Avoid generic AI-generated SaaS styling.
+
+Avoid a conventional dashboard as the main experience.
+
+Avoid excessive glassmorphism, oversized gradients, neon colors and cluttered controls.
+
+## Color palette
+
+Use a restrained winter palette.
+
+Primary background:
+- Deep midnight navy: approximately #0D1723.
+
+Secondary panels:
+- Dark winter blue: approximately #132131.
+
+Primary text:
+- Soft white: approximately #EDF2F6.
+
+Secondary text:
+- Muted blue-grey: approximately #91A1B1.
+
+Accent:
+- Champagne gold: approximately #E5C783.
+
+Winter environment:
+- Snow white.
+- Icy blue.
+- Muted steel blue.
+
+Warm environmental lights:
+- Amber.
+- Soft gold.
+- Warm ivory.
+
+Use gold sparingly for important actions, active selections and meaningful highlights.
+
+## Typography
+
+Use a clean modern sans-serif font for interface text.
+
+Use a tasteful serif or elegant display face for emotional headings where appropriate.
+
+Typography must remain legible on smaller screens.
+
+Avoid excessively small text.
+
+## Interface layout
+
+The main desktop layout should include:
+
+### Top bar
+
+- Product identity.
+- Christmas countdown.
+- Account menu.
+- Save status or other essential state.
+
+### Left sidebar
+
+- Landscape selector.
+- Placeable object catalog.
+- Selected-object controls.
+- Placement instructions.
+- Object count.
+
+### Main 3D viewport
+
+- The actual interactive 3D world.
+- Camera controls.
+- Subtle orientation or interaction hints.
+- Contextual placement feedback.
+
+### Contextual gift control
+
+- Daily gift availability.
+- Gift collection modal.
+- Reward status.
+
+### Mobile layout
+
+On mobile, reorganize the controls to preserve a large, usable 3D viewport.
+
+Use collapsible panels, bottom sheets or a compact object drawer.
+
+Do not simply shrink the entire desktop interface to fit a phone.
+
+Ensure controls are touch-friendly.
+
+## Micro-interactions
+
+Use restrained transitions for:
+
+- Opening the gift modal.
+- Selecting an object.
+- Switching landscapes.
+- Collecting a reward.
+- Saving the world.
+- Exporting an image.
+
+Every animation should serve a purpose.
+
+Respect reduced-motion preferences where practical.
+
+---
+
+# 16. PERFORMANCE AND TECHNICAL QUALITY
+
+The game must remain usable on ordinary modern laptops and mobile devices.
+
+## Performance principles
+
+- Use instanced meshes for repeated trees, ornaments or particles where beneficial.
+- Reuse geometries and materials.
+- Avoid unnecessary React re-renders of the entire scene.
+- Lazy-load large assets.
+- Optimize GLB/GLTF models.
+- Use appropriate texture sizes.
+- Limit dynamic shadow-casting lights.
+- Keep post-processing optional.
+- Dispose of resources correctly when removing objects or unloading assets.
+- Provide loading indicators for large assets.
+- Handle WebGL errors gracefully.
+
+Use quality settings that can be adjusted based on device capabilities.
+
+Do not sacrifice the entire visual experience for performance, but avoid effects that make the app unusable.
+
+## Error handling
+
+Provide clear messages for:
+
+- Failed login.
+- Failed cloud save.
+- Missing backend configuration.
+- Failed asset loading.
+- Failed image export.
+- WebGL initialization failure.
+- Network interruption.
+
+Never silently ignore critical failures.
+
+---
+
+# 17. ACCESSIBILITY AND USABILITY
+
+Implement basic accessibility from the beginning.
+
+- Semantic HTML.
+- Accessible names for icon-only buttons.
+- Keyboard focus states.
+- Readable contrast.
+- Clear active states.
+- Useful empty states.
+- Responsive layout.
+- Touch-friendly controls.
+- Reduced-motion support where appropriate.
+
+The 3D scene may require mouse or touch input, but important interface actions should remain accessible through conventional buttons.
+
+Do not make the entire application dependent on hover states.
+
+---
+
+# 18. DATABASE DESIGN
+
+Create a sensible initial Supabase schema.
+
+Suggested entities:
+
+## profiles
+
+- id, linked to the authenticated user.
+- display_name.
+- created_at.
+- updated_at.
+
+## worlds
+
+- id.
+- owner_user_id.
+- name.
+- landscape_type.
+- serialized_world_state or an equivalent normalized structure.
+- camera_state.
+- created_at.
+- updated_at.
+
+## daily_rewards
+
+- id.
+- owner_user_id.
+- reward_date.
+- reward_type.
+- world_id.
+- created_at.
+
+Add appropriate indexes and constraints.
+
+Enforce a unique reward claim per user and eligible date.
+
+Use foreign keys where appropriate.
+
+Create Row Level Security policies for private user data.
+
+Make the reward-claim process atomic so that two simultaneous requests cannot grant duplicate daily rewards.
+
+Use database constraints and server-side validation in addition to frontend checks.
+
+Do not store passwords directly.
+
+Do not expose privileged database operations to unauthenticated clients.
+
+Document the SQL migrations and setup procedure.
+
+---
+
+# 19. WORLD DATA AND OBJECT CATALOG
+
+Use TypeScript types for the main data structures.
+
+The world should contain a stable identifier, landscape selection, placed objects, relevant world settings and camera state.
+
+Each placed object should contain:
+
+- Unique object ID.
+- Asset type.
+- Position.
+- Rotation.
+- Scale.
+- Optional customization.
+- Creation metadata where useful.
+
+Keep game state separate from Three.js runtime objects.
+
+The object catalog should define each asset's:
+
+- Identifier.
+- Display name.
+- Category.
+- Preview.
+- Default scale.
+- Placement behavior.
+- Asset source.
+- Availability rules.
+
+This allows new assets to be added without changing core placement logic.
+
+Validate data received from the database before using it to construct the 3D world.
+
+Provide a schema version or migration strategy so that saved worlds remain usable as the application evolves.
+
+---
+
+# 20. REQUIRED FILE ORGANIZATION
+
+Use a modular project structure similar to the following. Adapt it if there is a strong technical reason, but preserve separation of responsibilities.
+
+src/
+  app/
+    App.tsx
+    routes.tsx
+    providers.tsx
+
+  components/
+    layout/
+      TopBar.tsx
+      GameLayout.tsx
+      MobileControls.tsx
+    ui/
+      Button.tsx
+      Modal.tsx
+      LoadingState.tsx
+      ErrorState.tsx
+
+  game/
+    WorldCanvas.tsx
+    CameraControls.tsx
+    SnowTerrain.tsx
+    SkyAndLighting.tsx
+    Snowfall.tsx
+    LandscapeRenderer.tsx
+    ObjectRenderer.tsx
+    ObjectPlacementController.tsx
+    ObjectSelection.tsx
+
+    landscapes/
+      MountainLandscape.tsx
+      VillageLandscape.tsx
+      RiverLandscape.tsx
+      CityLandscape.tsx
+
+    assets/
+      assetCatalog.ts
+      procedural/
+        ChristmasTree.tsx
+        ChristmasHouse.tsx
+        StreetLamp.tsx
+        GiftBox.tsx
+        Snowman.tsx
+        ChristmasTrain.tsx
+
+  features/
+    auth/
+      AuthProvider.tsx
+      LoginPage.tsx
+      SignupPage.tsx
+      authService.ts
+
+    world/
+      WorldProvider.tsx
+      worldTypes.ts
+      worldService.ts
+      worldPersistence.ts
+
+    gifts/
+      GiftPanel.tsx
+      GiftModal.tsx
+      giftCatalog.ts
+      giftService.ts
+
+    countdown/
+      ChristmasCountdown.tsx
+      countdownUtils.ts
+
+    export/
+      ImageExportButton.tsx
+      exportService.ts
+
+  lib/
+    supabase.ts
+    validation.ts
+    dateUtils.ts
+
+  styles/
+    tokens.css
+    global.css
+
+  main.tsx
+
+public/
+  assets/
+    models/
+    textures/
+    environment/
+
+supabase/
+  migrations/
+
+Also include:
+- `package.json`
+- Vite configuration.
+- TypeScript configuration.
+- `.env.example`
+- `.gitignore`
+- `README.md`
+
+Do not create empty placeholder files just to imitate this structure. Each implemented file must have a clear purpose.
+
+---
+
+# 21. IMPLEMENTATION PLAN
+
+Implement the application in verifiable stages.
+
+Do not attempt to build every advanced feature in one uncontrolled code generation step.
+
+## Stage 1 — Functional 3D core
+
+Implement:
+
+- React and Vite project.
+- Main interface.
+- Real Three.js scene.
+- Snowy terrain.
+- Four landscapes.
+- 360-degree camera.
+- Six initial placeable objects.
+- Object selection.
+- Object movement.
+- Object rotation.
+- Object deletion.
+- Christmas countdown.
+- Daily gift selection.
+- PNG export.
+
+At the end of this stage, a user must be able to open the app and actually build a small Christmas world.
+
+## Stage 2 — Persistent data
+
+Implement:
+
+- Typed world state.
+- Serialization and deserialization.
+- Local development cache if useful.
+- Save status.
+- World restoration.
+- Protection against accidental empty overwrites.
+
+## Stage 3 — Supabase authentication and cloud saving
+
+Implement:
+
+- Authentication screens.
+- Session management.
+- Database migrations.
+- Row Level Security.
+- User-owned worlds.
+- Cloud save and load.
+- Recovery and error states.
+
+Do not claim cloud saving works until it has been configured and tested against an actual Supabase project.
+
+## Stage 4 — Daily reward system
+
+Implement:
+
+- Reward catalog.
+- Daily eligibility.
+- Atomic reward claiming.
+- Server/database enforcement.
+- Reward persistence.
+- UI state for available and collected gifts.
+- Testing support.
+
+## Stage 5 — Visual quality upgrade
+
+Improve:
+
+- Terrain.
+- Snow materials.
+- Lighting.
+- Environment.
+- Trees.
+- Houses.
+- City architecture.
+- Object detail.
+- Shadows.
+- Atmospheric effects.
+
+Prefer high-quality assets with clear licensing and sensible file sizes.
+
+Use procedural geometry when it is visually appropriate.
+
+## Stage 6 — Export quality and sharing
+
+Improve image export, framing, aspect ratios and social sharing.
+
+## Stage 7 — Future premium features
+
+Only after the core is stable, plan:
+
+- More assets.
+- More landscapes.
+- Multiple worlds.
+- Premium decorations.
+- AI-generated cinematic videos.
+- Payments and credits.
+
+---
+
+# 22. TESTING AND ACCEPTANCE CRITERIA
+
+Do not mark a feature complete merely because its code exists.
+
+Verify behavior.
+
+## 3D world tests
+
+- The scene renders without console errors.
+- All four landscapes can be selected.
+- The camera rotates through 360 degrees.
+- Zoom works within limits.
+- The world remains visually coherent at different camera angles.
+
+## Placement tests
+
+- Selecting an object activates placement mode.
+- Clicking the ground places the object at the correct world position.
+- The object can be selected.
+- The object can be moved.
+- The object can be rotated.
+- The object can be deleted.
+- The object remains within the buildable area.
+- Changing the landscape does not unexpectedly erase user-created objects.
+
+## Countdown tests
+
+- The countdown updates.
+- The next Christmas is calculated correctly.
+- The date boundary around December 25 is handled correctly.
+
+## Gift tests
+
+- The gift panel opens.
+- The available choices are visible.
+- A chosen gift is added to the world.
+- The updated world is saved.
+- Production reward limits cannot be bypassed by refreshing or manipulating client state.
+
+## Persistence tests
+
+- Refreshing restores the saved world.
+- Logging out and back in restores the correct user's world.
+- A failed network request does not silently destroy valid saved data.
+- Users cannot access other users' worlds.
+
+## Export tests
+
+- PNG export downloads an image.
+- The image contains the actual 3D world.
+- Export works with the selected landscape and placed objects.
+- Export errors are handled visibly.
+
+## Build tests
+
+Run the appropriate checks, including:
+
+- TypeScript compilation.
+- Production build.
+- Relevant unit tests.
+- Browser-level interaction tests where available.
+
+Fix the errors before reporting success.
+
+Do not invent test results. Clearly distinguish tests that were executed from tests that remain unverified.
+
+---
+
+# 23. HOW YOU MUST WORK
+
+I want the AI to write almost all the code. I will inspect and test the result rather than manually implementing every component.
+
+Follow these rules:
+
+1. Start by inspecting the available project environment and its existing files.
+2. If a project already exists, preserve working functionality unless there is a clear reason to change it.
+3. Establish the architecture and implement the smallest complete working milestone first.
+4. Write real code, not pseudocode.
+5. Do not return only a long explanation of what should be done.
+6. Do not create a static visual mockup in place of the game.
+7. Do not simulate successful authentication, cloud saving or payment operations.
+8. Do not omit critical error handling.
+9. Use strict TypeScript and reusable components.
+10. Fix imports, types and dependency mismatches.
+11. Test the actual development and production build.
+12. Keep the interface polished while prioritizing functional correctness.
+13. Explain any configuration I must perform personally, especially Supabase credentials and external service setup.
+14. Never expose secrets in frontend code.
+15. Keep a concise implementation checklist and update it after each milestone.
+16. When blocked by missing credentials or an unavailable external service, finish all independent work and clearly identify the remaining configuration.
+17. Do not stop after writing a plan. Continue implementing the code that the available environment supports.
+18. Do not claim a feature is complete until its acceptance criteria have been verified.
+
+# 24. FIRST ACTION
+
+Begin now.
+
+First, inspect the current development environment and determine which files and execution tools are available.
+
+Then:
+
+1. Establish the React + TypeScript + Vite application.
+2. Install compatible Three.js, React Three Fiber and Drei dependencies.
+3. Build the first working 3D scene.
+4. Implement the four selectable landscapes.
+5. Implement object placement, selection, movement, rotation and deletion.
+6. Add the countdown, daily gift interface and PNG export.
+7. Run the available checks and fix any errors.
+8. Present the running result and a precise summary of what works.
+
+If the environment supports file creation and execution, create and test the files directly.
+
+If the environment cannot run commands, write the complete required source files and provide exact instructions for running them.
+
+Do not stop at a pretty first screen.
+
+The first milestone is complete only when the user can enter the 3D world, rotate the camera, choose a landscape, place and move objects, collect a test gift and export an image.
+
+The ultimate goal is a reliable, extensible foundation for the full My Christmas World product.
