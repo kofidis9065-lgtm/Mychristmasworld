@@ -180,8 +180,8 @@ export const TopBar: React.FC<Props> = ({
               <Camera className="w-3.5 h-3.5" />
             </button>
 
-            {/* Desktop-only Direct Buttons */}
-            <div className="hidden sm:flex items-center gap-1.5">
+            {/* Desktop & Tablet Direct Buttons */}
+            <div className="desktop-only-control items-center gap-1.5">
               {/* Cloud/Local Save */}
               <button
                 onClick={() => {
@@ -233,13 +233,13 @@ export const TopBar: React.FC<Props> = ({
               </button>
             </div>
 
-            {/* Mobile Menu Toggle (Ensures ALL choices appear cleanly on vertical mobile) */}
+            {/* Mobile Menu Toggle (hamburger button active on mobile portrait & landscape) */}
             <button
               onClick={() => {
                 soundEngine.playClick();
                 setMobileMenuOpen(!mobileMenuOpen);
               }}
-              className="sm:hidden p-2 rounded-xl winter-panel text-white hover:text-[#e5c783] cursor-pointer"
+              className="mobile-only-control p-2 rounded-xl winter-panel text-white hover:text-[#e5c783] cursor-pointer"
               title="Menu Options"
             >
               {mobileMenuOpen ? <X className="w-4 h-4 text-amber-300" /> : <Menu className="w-4 h-4" />}
@@ -248,7 +248,7 @@ export const TopBar: React.FC<Props> = ({
         </div>
 
         {/* Desktop & Tablet Secondary Bar */}
-        <div className="hidden sm:flex pointer-events-auto items-center justify-between gap-1.5 overflow-x-auto py-0.5 scrollbar-none">
+        <div className="desktop-only-control pointer-events-auto items-center justify-between gap-1.5 overflow-x-auto py-0.5 scrollbar-none">
           <div className="flex items-center gap-1 sm:gap-1.5 rounded-xl winter-panel p-1 backdrop-blur-md">
             {/* Atmosphere Choices: Night, Sunset, Day */}
             <span className="text-[10px] text-[#91a1b1] px-1 font-medium">Sky:</span>
@@ -356,9 +356,9 @@ export const TopBar: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Vertical Mobile Menu Modal/Panel (Fixes Request 4: flawless portrait mobile view) */}
+        {/* Mobile Menu Panel (Active in both vertical portrait & horizontal landscape mobile modes) */}
         {mobileMenuOpen && (
-          <div className="sm:hidden pointer-events-auto winter-panel-gold rounded-2xl p-3.5 shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200 border-[#e5c783]/50">
+          <div className="mobile-only-control flex-col max-h-[80vh] overflow-y-auto pointer-events-auto winter-panel-gold rounded-2xl p-3.5 shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200 border-[#e5c783]/50">
             <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/10">
               <span className="text-xs font-bold uppercase tracking-wider text-white font-serif-display">
                 World Controls

@@ -88,3 +88,22 @@ body {
   filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.6));
 }
 
+/* World Controls: Hamburger menu on mobile (portrait & landscape horizontal), direct bar on Tablet & PC */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) {
+  .mobile-only-control {
+    display: flex !important;
+  }
+  .desktop-only-control {
+    display: none !important;
+  }
+}
+
+@media (min-width: 768px) and (min-height: 501px) {
+  .mobile-only-control {
+    display: none !important;
+  }
+  .desktop-only-control {
+    display: flex !important;
+  }
+}
+
