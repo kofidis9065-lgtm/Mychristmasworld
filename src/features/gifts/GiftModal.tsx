@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { Gift, Sparkles, Check, X, RotateCcw, BookmarkCheck, ArrowRight, Clock } from 'lucide-react';
+import { Gift, Sparkles, Check, X, RotateCcw, BookmarkCheck, ArrowRight, Clock, Play } from 'lucide-react';
 import { AssetDefinition, PlacedObject } from '../world/worldTypes';
 import { getAvailableGiftPool, checkDailyGiftClaimed, claimDailyGift, devResetDailyClaims } from './giftService';
 import { soundEngine } from '../../lib/audioSynthesis';
 import { User } from '@supabase/supabase-js';
 import { AppUser } from '../auth/userAuthService';
 import { ASSET_CATALOG } from '../../game/assets/assetCatalog';
+import { initGoogleH5Ads, showRewardedAd } from '../../lib/googleH5Ads';
 
 interface Props {
   isOpen: boolean;
@@ -61,6 +62,7 @@ export const GiftModal: React.FC<Props> = ({
 
   useEffect(() => {
     if (isOpen) {
+      initGoogleH5Ads();
       checkStatus();
       const interval = setInterval(() => {
         setCountdown(getTimeUntilMidnight());
@@ -90,46 +92,61 @@ export const GiftModal: React.FC<Props> = ({
     if (alreadyClaimed || isOpening) return;
     setIsOpening(true);
     setSelectedBoxIndex(boxIdx);
+    setErrorMessage(null);
     soundEngine.playClick();
 
-    setTimeout(async () => {
-      const res = await claimDailyGift(reward.id, worldId, user, 0, currentUser?.id);
+    // REQUIREMENT #1 & #2: Watch real Google Rewarded Ad and unlock ONLY after official adViewed callback confirms!
+    const adResult = await showRewardedAd('daily_christmas_gift');
 
-      if (!res.success) {
-        setErrorMessage(res.error || 'Could not claim reward');
-        setIsOpening(false);
-        return;
-      }
-
-      setClaimedReward(reward);
+    if (!adResult.success) {
       setIsOpening(false);
-      setAlreadyClaimed(true);
+      setSelectedBoxIndex(null);
+      // REQUIREMENT #4 & #9: If ad unavailable, skipped or fails, keep gift locked
+      setErrorMessage(
+        adResult.errorMsg ||
+          'Ads temporarily unavailable. Ensure your AdSense Publisher ID (pub-6972943555103902) has approved H5 Games Ad Placement API access.'
+      );
+      return;
+    }
 
-      // Fanfare sound & confetti
-      soundEngine.playGiftFanfare();
-      try {
-        confetti({
-          particleCount: 140,
-          spread: 90,
-          origin: { y: 0.55 },
-          colors: ['#e5c783', '#ef4444', '#15803d', '#38bdf8', '#f8fafc'],
-        });
-      } catch {
-        // fallback
-      }
+    // Ad watched completely! Claim daily gift
+    const res = await claimDailyGift(reward.id, worldId, user, 0, currentUser?.id);
 
-      // Add to world
-      const newObj: PlacedObject = {
-        id: 'gift_reward_' + Math.random().toString(36).substring(2, 9),
-        assetType: reward.id,
-        name: reward.name,
-        position: [0, 0, 3],
-        rotation: [0, 0, 0],
-        scale: [1, 1, 1],
-        createdAt: new Date().toISOString(),
-      };
-      onGiftClaimed(newObj, reward.id);
-    }, 900);
+    if (!res.success) {
+      setErrorMessage(res.error || 'Could not claim reward');
+      setIsOpening(false);
+      setSelectedBoxIndex(null);
+      return;
+    }
+
+    setClaimedReward(reward);
+    setIsOpening(false);
+    setAlreadyClaimed(true);
+
+    // Fanfare sound & confetti
+    soundEngine.playGiftFanfare();
+    try {
+      confetti({
+        particleCount: 140,
+        spread: 90,
+        origin: { y: 0.55 },
+        colors: ['#e5c783', '#ef4444', '#15803d', '#38bdf8', '#f8fafc'],
+      });
+    } catch {
+      // fallback
+    }
+
+    // Add to world
+    const newObj: PlacedObject = {
+      id: 'gift_reward_' + Math.random().toString(36).substring(2, 9),
+      assetType: reward.id,
+      name: reward.name,
+      position: [0, 0, 3],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      createdAt: new Date().toISOString(),
+    };
+    onGiftClaimed(newObj, reward.id);
   };
 
   const handleDevReset = async () => {
@@ -323,9 +340,12 @@ export const GiftModal: React.FC<Props> = ({
           /* SCREEN: PICK MYSTERY GIFT                                           */
           /* ==================================================================== */
           <div>
-            <p className="text-xs text-amber-200/90 mb-4 text-center font-medium">
-              Pick one secret mystery box to unwrap and add to your library:
-            </p>
+            <div className="p-2.5 mb-4 rounded-xl bg-amber-500/10 border border-amber-400/30 text-center">
+              <p className="text-xs text-amber-200 font-semibold flex items-center justify-center gap-1.5">
+                <Play className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
+                <span>Watch 1 Google Rewarded Ad to unwrap your daily mystery gift:</span>
+              </p>
+            </div>
 
             <div className="grid grid-cols-3 gap-3 mb-5">
               {giftPool.map((gift, idx) => {
@@ -342,7 +362,7 @@ export const GiftModal: React.FC<Props> = ({
                     key={gift.id}
                     onClick={() => handleOpenGift(gift, idx)}
                     disabled={isOpening}
-                    className={`group relative flex flex-col items-center justify-center p-4 rounded-2xl border transition-all cursor-pointer active:scale-95 ${
+                    className={`group relative flex flex-col items-center justify-center p-3.5 rounded-2xl border transition-all cursor-pointer active:scale-95 ${
                       boxStyles.color
                     } ${
                       isThisOpening
@@ -350,14 +370,16 @@ export const GiftModal: React.FC<Props> = ({
                         : 'hover:scale-102 hover:bg-white/10'
                     }`}
                   >
-                    <div className="text-4xl sm:text-5xl mb-2 group-hover:scale-110 transition-transform filter drop-shadow">
+                    <div className="text-4xl sm:text-5xl mb-1.5 group-hover:scale-110 transition-transform filter drop-shadow">
                       {isThisOpening ? '✨' : boxStyles.icon}
                     </div>
                     <span className="text-xs font-bold text-center text-white line-clamp-1 font-serif-display">
                       Mystery Box #{idx + 1}
                     </span>
-                    <span className="text-[10px] text-[#e5c783] mt-0.5">
-                      {isThisOpening ? 'Unwrapping...' : boxStyles.ribbon}
+                    
+                    <span className="mt-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400 text-black shadow flex items-center gap-1">
+                      <Play className="w-2.5 h-2.5 fill-black" />
+                      <span>{isThisOpening ? 'Playing Ad...' : 'Watch Ad'}</span>
                     </span>
                   </button>
                 );

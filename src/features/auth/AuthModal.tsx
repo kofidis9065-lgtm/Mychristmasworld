@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { AppUser, registerUser, loginUser, logoutUser } from './userAuthService';
+import React, { useState, useEffect } from 'react';
+import { AppUser, registerUser, loginUser, logoutUser, loginWithGoogleCredential } from './userAuthService';
 import { X, User as UserIcon, Check, ShieldCheck, RefreshCw, LogOut, KeyRound, Mail, Sparkles, Trash2 } from 'lucide-react';
 import { soundEngine } from '../../lib/audioSynthesis';
 import { clearAllAppCache } from '../../lib/cacheManager';
@@ -26,6 +26,48 @@ export const AuthModal: React.FC<Props> = ({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim();
+
+  useEffect(() => {
+    if (isOpen && typeof window !== 'undefined' && (window as any).google?.accounts?.id) {
+      try {
+        if (googleClientId) {
+          (window as any).google.accounts.id.initialize({
+            client_id: googleClientId,
+            callback: async (response: any) => {
+              if (response.credential) {
+                setLoading(true);
+                setErrorMsg(null);
+                const res = await loginWithGoogleCredential(response.credential);
+                setLoading(false);
+                if (res.success && res.user) {
+                  onUserChanged(res.user);
+                  setSuccessMsg(`Welcome, ${res.user.nickname}! Connected with Google.`);
+                  setTimeout(() => onClose(), 1200);
+                } else {
+                  setErrorMsg(res.error || 'Google Sign-In failed.');
+                }
+              }
+            },
+          });
+
+          const container = document.getElementById('googleSignInBtnContainer');
+          if (container) {
+            container.innerHTML = '';
+            (window as any).google.accounts.id.renderButton(container, {
+              theme: 'outline',
+              size: 'large',
+              width: 320,
+              text: 'signin_with',
+              shape: 'pill',
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Google Identity GIS error:', err);
+      }
+    }
+  }, [isOpen, googleClientId]);
 
   if (!isOpen) return null;
 
@@ -170,6 +212,25 @@ export const AuthModal: React.FC<Props> = ({
         ) : (
           /* Sign In / Register Forms */
           <div className="space-y-4">
+            {/* Google Sign-In Mode */}
+            <div className="p-3 rounded-xl bg-white/5 border border-white/10 text-center space-y-2">
+              <span className="text-[11px] font-semibold text-amber-200 block uppercase tracking-wider">
+                Google Account Sign-In
+              </span>
+              <div id="googleSignInBtnContainer" className="flex justify-center my-1 min-h-[40px]" />
+              {!googleClientId && (
+                <div className="text-[10px] text-[#91a1b1] leading-tight">
+                  Google Sign-In active. (Optional: Set <span className="text-amber-300 font-mono">VITE_GOOGLE_CLIENT_ID</span> in environment variables for official OAuth button)
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 text-[10px] text-[#91a1b1] uppercase tracking-wider">
+              <div className="flex-1 h-[1px] bg-white/10" />
+              <span>or Email & Password</span>
+              <div className="flex-1 h-[1px] bg-white/10" />
+            </div>
+
             {/* Tabs */}
             <div className="flex rounded-xl bg-black/40 p-1 border border-white/10">
               <button

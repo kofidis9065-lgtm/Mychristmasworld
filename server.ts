@@ -78,6 +78,32 @@ function writeJsonFile<T>(filePath: string, data: T) {
 }
 
 // API Routes
+// Auth 0: Google Sign-In Sync
+app.post('/api/auth/google-sync', (req: Request, res: Response) => {
+  const { id, email, nickname, avatar } = req.body;
+  if (!email || !id) {
+    return res.status(400).json({ success: false, error: 'User ID and Email required' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanNick = (nickname || cleanEmail.split('@')[0]).trim();
+  const users = readJsonFile<Record<string, any>>(USERS_FILE, {});
+
+  const googleUser = {
+    id,
+    email: cleanEmail,
+    nickname: cleanNick,
+    avatar: avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanNick)}&backgroundColor=0d1723`,
+    provider: 'google',
+    updatedAt: new Date().toISOString(),
+  };
+
+  users[cleanEmail] = googleUser;
+  writeJsonFile(USERS_FILE, users);
+
+  return res.json({ success: true, user: googleUser });
+});
+
 // Auth 1: Register Account
 app.post('/api/auth/register', (req: Request, res: Response) => {
   const { email, nickname, password } = req.body;

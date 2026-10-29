@@ -6,6 +6,63 @@ export interface AppUser {
   nickname: string;
   avatar: string;
   createdAt: string;
+  provider?: 'local' | 'google';
+}
+
+export function parseJwt(token: string): any {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    return JSON.parse(jsonPayload);
+  } catch {
+    return null;
+  }
+}
+
+export async function loginWithGoogleCredential(
+  credentialToken: string
+): Promise<{ success: boolean; user?: AppUser; error?: string }> {
+  const payload = parseJwt(credentialToken);
+  if (!payload || !payload.email || !payload.sub) {
+    return { success: false, error: 'Could not decode Google Sign-In response token.' };
+  }
+
+  const cleanEmail = payload.email.trim().toLowerCase();
+  const cleanNick = payload.name || payload.given_name || cleanEmail.split('@')[0];
+  const avatar =
+    payload.picture ||
+    `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanNick)}&backgroundColor=0d1723`;
+  const userId = 'google_' + payload.sub;
+
+  const appUser: AppUser = {
+    id: userId,
+    email: cleanEmail,
+    nickname: cleanNick,
+    avatar,
+    createdAt: new Date().toISOString(),
+    provider: 'google',
+  };
+
+  setStoredUser(appUser);
+
+  // Sync to server backend
+  try {
+    await fetch('/api/auth/google-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(appUser),
+    });
+  } catch (err) {
+    console.warn('Google backend sync warning:', err);
+  }
+
+  return { success: true, user: appUser };
 }
 
 const CURRENT_USER_SESSION_KEY = 'mcw_current_user_v2';
