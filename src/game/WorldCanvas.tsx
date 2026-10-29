@@ -8,11 +8,13 @@ import { createAssetObject } from './assets/proceduralModels';
 import { SkyAndLighting } from './SkyAndLighting';
 import { SnowfallSystem } from './Snowfall';
 import { soundEngine } from '../lib/audioSynthesis';
+import { SantaAnimationSystem, SantaAnimType } from './animations/SantaAnimationSystem';
 
 export interface WorldCanvasHandle {
   captureSnapshot: (aspectRatio: 'standard' | 'square' | 'vertical') => string | null;
   resetCamera: () => void;
   setCinematicAngle: (angle: 'overview' | 'close' | 'top') => void;
+  triggerSantaAnimation: (onComplete?: () => void) => SantaAnimType;
 }
 
 interface Props {
@@ -49,6 +51,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
   const controlsRef = useRef<OrbitControls | null>(null);
   const skyRef = useRef<SkyAndLighting | null>(null);
   const snowfallRef = useRef<SnowfallSystem | null>(null);
+  const santaSystemRef = useRef<SantaAnimationSystem | null>(null);
 
   // Group references
   const landscapeGroupRef = useRef<THREE.Group | null>(null);
@@ -122,6 +125,12 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
         controlsRef.current.target.set(0, 0, 0);
       }
       controlsRef.current.update();
+    },
+    triggerSantaAnimation: (onComplete?: () => void): SantaAnimType => {
+      if (santaSystemRef.current) {
+        return santaSystemRef.current.triggerNextAnimation(onComplete);
+      }
+      return 'sky';
     },
   }));
 
@@ -212,6 +221,10 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
     }
     snowfallRef.current = snowfall;
 
+    // 9b. Santa Sleigh & Reindeer Flying Animation System
+    const santaSystem = new SantaAnimationSystem(scene);
+    santaSystemRef.current = santaSystem;
+
     // 10. Selection Indicator Ring
     const selGroup = new THREE.Group();
     selGroup.name = 'SelectionIndicator';
@@ -291,6 +304,11 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
       // Update snowfall particles
       if (snowfall) {
         snowfall.update(delta);
+      }
+
+      // Update Santa Sleigh & Reindeer Flying Animation System
+      if (santaSystem) {
+        santaSystem.update(delta);
       }
 
       renderer.render(scene, camera);
@@ -555,6 +573,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
       controls.dispose();
       sky.dispose();
       snowfall.dispose();
+      santaSystem.dispose();
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);

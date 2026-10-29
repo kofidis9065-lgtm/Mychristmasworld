@@ -173,6 +173,101 @@ class SoundEngine {
       // AudioContext might be blocked until user gesture
     }
   }
+
+  public playSantaSkyFlight() {
+    if (!this.enabled) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // 1. Sleigh bells jingle sequence
+    const bellFrequencies = [2093, 2637, 3135, 4186];
+    for (let j = 0; j < 8; j++) {
+      const bellTime = t + j * 0.16;
+      bellFrequencies.forEach((freq) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, bellTime);
+        gain.gain.setValueAtTime(0.04, bellTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, bellTime + 0.12);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(bellTime);
+        osc.stop(bellTime + 0.12);
+      });
+    }
+
+    // 2. Synthesized Jolly "Ho! Ho! Ho!" low resonant vocal bells
+    const hoTimes = [t + 0.3, t + 0.9, t + 1.5];
+    const hoFreqs = [150, 135, 120];
+    hoTimes.forEach((hoTime, idx) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(hoFreqs[idx], hoTime);
+      osc.frequency.exponentialRampToValueAtTime(hoFreqs[idx] * 0.85, hoTime + 0.28);
+
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(500, hoTime);
+      filter.Q.setValueAtTime(3.0, hoTime);
+
+      gain.gain.setValueAtTime(0.12, hoTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, hoTime + 0.3);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(hoTime);
+      osc.stop(hoTime + 0.3);
+    });
+
+    // 3. Golden Magic Chime Ascent
+    const magicNotes = [523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98];
+    magicNotes.forEach((freq, i) => {
+      if (!this.ctx) return;
+      const mTime = t + 0.4 + i * 0.14;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, mTime);
+      gain.gain.setValueAtTime(0.08, mTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, mTime + 0.5);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(mTime);
+      osc.stop(mTime + 0.5);
+    });
+  }
+
+  public playSantaSecretSneak() {
+    if (!this.enabled) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    // Quiet gentle sleigh bell steps
+    const sneakNotes = [1046.5, 1318.5, 1174.6, 1396.9, 1567.9];
+    sneakNotes.forEach((freq, i) => {
+      if (!this.ctx) return;
+      const sTime = t + i * 0.28;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, sTime);
+      gain.gain.setValueAtTime(0.05, sTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, sTime + 0.35);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(sTime);
+      osc.stop(sTime + 0.35);
+    });
+  }
 }
 
 export const soundEngine = new SoundEngine();

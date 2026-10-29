@@ -15,14 +15,16 @@ import {
   Sparkles,
   Menu,
   X,
+  Trash2,
 } from 'lucide-react';
 import { TimeOfDay } from '../../features/world/worldTypes';
 import { ChristmasCountdown } from '../../features/countdown/ChristmasCountdown';
 import { soundEngine } from '../../lib/audioSynthesis';
 import { User } from '@supabase/supabase-js';
-import { GoogleUser } from '../../features/auth/googleAuthService';
+import { AppUser } from '../../features/auth/userAuthService';
 import { AnimatedSantaIcon } from '../ui/AnimatedSantaIcon';
 import { youtubeAudio } from '../../lib/youtubePlayerService';
+import { clearAllAppCache } from '../../lib/cacheManager';
 
 interface Props {
   timeOfDay: TimeOfDay;
@@ -39,8 +41,10 @@ interface Props {
   onOpenAuth: () => void;
   onResetCamera: () => void;
   user: User | null;
-  googleUser?: GoogleUser | null;
+  currentUser?: AppUser | null;
+  googleUser?: any;
   dailyGiftAvailable: boolean;
+  onTriggerSanta?: () => void;
 }
 
 export const TopBar: React.FC<Props> = ({
@@ -58,9 +62,12 @@ export const TopBar: React.FC<Props> = ({
   onOpenAuth,
   onResetCamera,
   user,
+  currentUser,
   googleUser,
   dailyGiftAvailable,
+  onTriggerSanta,
 }) => {
+  const activeUser = currentUser || googleUser || (user ? { nickname: user.email?.split('@')[0], email: user.email, avatar: '' } : null);
   const [musicState, setMusicState] = useState(youtubeAudio.getState());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -81,15 +88,26 @@ export const TopBar: React.FC<Props> = ({
       <div className="max-w-7xl mx-auto flex flex-col gap-2">
         {/* Main Bar */}
         <div className="flex items-center justify-between gap-2">
-          {/* 1. Left: ONLY 3D Animated Santa Face Icon (No title or description) */}
+          {/* 1. Left: ONLY 3D Animated Santa Face Icon (Click for Santa 3D Magic Animation!) */}
           <div className="pointer-events-auto flex items-center gap-2">
-            <div
-              className="p-1 rounded-2xl winter-panel shadow-xl border-[#e5c783]/30 hover:scale-105 active:scale-95 transition-transform cursor-pointer"
-              title="My Christmas World"
-              onClick={() => soundEngine.playClick()}
+            <button
+              type="button"
+              className="p-1 rounded-2xl winter-panel shadow-xl border-[#e5c783]/40 hover:scale-110 active:scale-95 transition-all cursor-pointer relative group focus:outline-none focus:ring-2 focus:ring-amber-400/50"
+              title="Click Santa for Holiday Magic! ✨ (Sky Sleigh Flight & Secret Village Pass)"
+              onClick={() => {
+                if (onTriggerSanta) {
+                  onTriggerSanta();
+                } else {
+                  soundEngine.playClick();
+                }
+              }}
             >
               <AnimatedSantaIcon size="md" showGreeting={false} />
-            </div>
+              <span className="absolute -bottom-1 -right-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-300"></span>
+              </span>
+            </button>
 
             {/* Countdown on Desktop */}
             <div className="hidden lg:block">
@@ -190,21 +208,19 @@ export const TopBar: React.FC<Props> = ({
                   onOpenAuth();
                 }}
                 className={`p-1.5 rounded-xl winter-panel transition-all cursor-pointer flex items-center gap-1.5 ${
-                  googleUser || user
+                  activeUser
                     ? 'text-emerald-400 border-emerald-500/40 bg-emerald-950/30'
                     : 'text-[#91a1b1] hover:text-white'
                 }`}
                 title={
-                  googleUser
-                    ? `Google Cloud: ${googleUser.email}`
-                    : user
-                    ? `Signed in as ${user.email}`
-                    : 'Sign in with Google Cloud'
+                  activeUser
+                    ? `Account: ${activeUser.nickname || activeUser.email}`
+                    : 'Sign In / Create Account'
                 }
               >
-                {googleUser?.avatar ? (
+                {activeUser?.avatar ? (
                   <img
-                    src={googleUser.avatar}
+                    src={activeUser.avatar}
                     alt="Avatar"
                     className="w-5 h-5 rounded-full object-cover border border-emerald-400/50"
                   />
@@ -212,7 +228,7 @@ export const TopBar: React.FC<Props> = ({
                   <UserIcon className="w-3.5 h-3.5" />
                 )}
                 <span className="text-[11px] font-medium hidden lg:inline max-w-[85px] truncate">
-                  {googleUser ? googleUser.name : user ? user.email?.split('@')[0] : 'Sign In'}
+                  {activeUser ? activeUser.nickname || 'Account' : 'Sign In'}
                 </span>
               </button>
             </div>
@@ -321,6 +337,22 @@ export const TopBar: React.FC<Props> = ({
               <RotateCcw className="w-3.5 h-3.5" />
               <span className="text-[10px]">Reset View</span>
             </button>
+
+            <div className="w-[1px] h-4 bg-white/10 mx-0.5" />
+
+            {/* Clear Cache & Reset Button */}
+            <button
+              onClick={() => {
+                if (window.confirm('Clear all local cache & browser storage and reload?')) {
+                  clearAllAppCache(true);
+                }
+              }}
+              title="Clear Local Cache & Stored Data"
+              className="p-1.5 rounded-lg text-red-300/70 hover:text-red-300 hover:bg-red-950/30 transition-all cursor-pointer flex items-center gap-1"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span className="text-[10px]">Clear Cache</span>
+            </button>
           </div>
         </div>
 
@@ -410,6 +442,18 @@ export const TopBar: React.FC<Props> = ({
                 <span>Sound FX: {soundEnabled ? 'On' : 'Off'}</span>
               </button>
 
+              {/* Santa Magic Flight Animation */}
+              <button
+                onClick={() => {
+                  if (onTriggerSanta) onTriggerSanta();
+                  setMobileMenuOpen(false);
+                }}
+                className="col-span-2 p-2.5 rounded-xl festive-gradient text-white flex items-center justify-center gap-2 font-bold shadow-lg"
+              >
+                <Sparkles className="w-4 h-4 text-amber-200 animate-spin" />
+                <span>🎅 Summon Santa Magic (Sky & Village)</span>
+              </button>
+
               {/* Reset Camera */}
               <button
                 onClick={() => {
@@ -436,7 +480,7 @@ export const TopBar: React.FC<Props> = ({
                 <span>{saveMode === 'cloud' ? 'Cloud Save' : 'Save Locally'}</span>
               </button>
 
-              {/* Account Profile / Google Cloud Login */}
+              {/* Account Profile / Local User Login */}
               <button
                 onClick={() => {
                   soundEngine.playClick();
@@ -447,12 +491,23 @@ export const TopBar: React.FC<Props> = ({
               >
                 <UserIcon className="w-4 h-4" />
                 <span>
-                  {googleUser
-                    ? `Connected: ${googleUser.name}`
-                    : user
-                    ? `Connected: ${user.email}`
-                    : 'Sign in with Google Cloud'}
+                  {activeUser
+                    ? `Account: ${activeUser.nickname || activeUser.email}`
+                    : 'Sign In / Create Account'}
                 </span>
+              </button>
+
+              {/* Clear Cache & Reset App */}
+              <button
+                onClick={() => {
+                  if (window.confirm('Clear all local cache & browser storage and reload?')) {
+                    clearAllAppCache(true);
+                  }
+                }}
+                className="col-span-2 p-2 rounded-xl bg-white/5 hover:bg-red-950/40 text-red-300 flex items-center justify-center gap-2 font-medium text-xs border border-white/5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear Cache & Reset Storage</span>
               </button>
             </div>
           </div>

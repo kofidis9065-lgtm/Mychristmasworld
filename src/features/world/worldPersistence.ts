@@ -1,7 +1,6 @@
 import { World, LandscapeType, PlacedObject } from './worldTypes';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
-import { User } from '@supabase/supabase-js';
-import { GoogleUser, saveWorldToCloudBackend, loadWorldFromCloudBackend } from '../auth/googleAuthService';
+import { AppUser, saveWorldToCloudBackend, loadWorldFromCloudBackend } from '../auth/userAuthService';
 import { DEFAULT_FREE_ASSET_IDS } from '../../game/assets/assetCatalog';
 
 const LOCAL_STORAGE_KEY = 'mcw_saved_world_v1';
@@ -192,8 +191,8 @@ export function createDefaultWorld(landscapeType: LandscapeType = 'village', use
 
 export async function saveWorld(
   world: World,
-  user: User | null,
-  googleUser?: GoogleUser | null
+  user: any | null,
+  appUser?: AppUser | null
 ): Promise<{ success: boolean; mode: 'cloud' | 'local'; error?: string }> {
   try {
     const updatedWorld: World = {
@@ -209,9 +208,9 @@ export async function saveWorld(
       // ignore
     }
 
-    // 1. Google Cloud Server Persistence
-    if (googleUser) {
-      const res = await saveWorldToCloudBackend(updatedWorld, googleUser.id);
+    // 1. Account Cloud Server Persistence
+    if (appUser) {
+      const res = await saveWorldToCloudBackend(updatedWorld, appUser.id);
       return res;
     }
 
@@ -266,13 +265,13 @@ export async function saveWorld(
 }
 
 export async function loadWorld(
-  user: User | null,
-  googleUser?: GoogleUser | null
+  user: any | null,
+  appUser?: AppUser | null
 ): Promise<World | null> {
-  // 1. Try Google Cloud Server first if logged in
-  if (googleUser) {
+  // 1. Try Account Cloud Server first if logged in
+  if (appUser) {
     try {
-      const cloudWorld = await loadWorldFromCloudBackend(googleUser.id);
+      const cloudWorld = await loadWorldFromCloudBackend(appUser.id);
       if (cloudWorld && Array.isArray(cloudWorld.placedObjects)) {
         const claimed = getClaimedDailyGiftAssetIds();
         const baseUnlocked = cloudWorld.unlockedAssetIds || [...DEFAULT_FREE_ASSET_IDS];

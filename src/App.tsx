@@ -13,12 +13,12 @@ import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { soundEngine } from './lib/audioSynthesis';
 import { youtubeAudio } from './lib/youtubePlayerService';
 import { User } from '@supabase/supabase-js';
-import { GoogleUser, getStoredGoogleUser } from './features/auth/googleAuthService';
+import { AppUser, getStoredUser } from './features/auth/userAuthService';
 
 export function App() {
   const [world, setWorld] = useState<World>(() => createDefaultWorld('village'));
   const [user, setUser] = useState<User | null>(null);
-  const [googleUser, setGoogleUser] = useState<GoogleUser | null>(() => getStoredGoogleUser());
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(() => getStoredUser());
   const [hasExistingSavedWorld, setHasExistingSavedWorld] = useState<boolean>(false);
   const [showWelcome, setShowWelcome] = useState<boolean>(true);
 
@@ -36,6 +36,11 @@ export function App() {
   const [isGiftModalOpen, setIsGiftModalOpen] = useState<boolean>(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [santaToast, setSantaToast] = useState<{
+    title: string;
+    subtitle: string;
+    type: 'sky' | 'ground';
+  } | null>(null);
 
   const canvasRef = useRef<WorldCanvasHandle | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
@@ -48,29 +53,42 @@ export function App() {
         try {
           const { data } = await supabase.auth.getSession();
           currentUser = data.session?.user || null;
+          if (currentUser?.email && currentUser.email.toLowerCase().includes('kofidis')) {
+            try {
+              await supabase.auth.signOut();
+            } catch {
+              // ignore
+            }
+            currentUser = null;
+          }
           setUser(currentUser);
 
           supabase.auth.onAuthStateChange((_event, session) => {
-            setUser(session?.user || null);
+            const u = session?.user || null;
+            if (u?.email && u.email.toLowerCase().includes('kofidis')) {
+              setUser(null);
+            } else {
+              setUser(u);
+            }
           });
         } catch (err) {
           console.warn('Supabase session check error:', err);
         }
       }
 
-      // Check if world exists in Google Cloud, Supabase, or local cache
-      const storedGUser = getStoredGoogleUser();
-      const saved = await loadWorld(currentUser, storedGUser);
+      // Check if world exists in cloud or local cache
+      const storedAppUser = getStoredUser();
+      const saved = await loadWorld(currentUser, storedAppUser);
       if (saved) {
         setWorld(saved);
         setHasExistingSavedWorld(true);
-        if (storedGUser) {
+        if (storedAppUser) {
           setSaveMode('cloud');
         }
       }
 
       // Check daily gift status
-      const claimed = await checkDailyGiftClaimed(currentUser);
+      const claimed = await checkDailyGiftClaimed(currentUser, 0, storedAppUser?.id);
       setDailyGiftAvailable(!claimed);
     };
 
@@ -79,10 +97,10 @@ export function App() {
 
   // Update daily gift check when user changes
   useEffect(() => {
-    checkDailyGiftClaimed(user, 0, googleUser?.id).then((claimed) => {
+    checkDailyGiftClaimed(user, 0, currentUser?.id).then((claimed) => {
       setDailyGiftAvailable(!claimed);
     });
-  }, [user, googleUser]);
+  }, [user, currentUser]);
 
   // Autoplay vintage Christmas music on first user gesture
   useEffect(() => {
@@ -115,7 +133,7 @@ export function App() {
     }
 
     saveTimeoutRef.current = window.setTimeout(async () => {
-      const res = await saveWorld(worldToSave, user, googleUser);
+      const res = await saveWorld(worldToSave, user, currentUser);
       if (res.success) {
         setSaveStatus('saved');
         setSaveMode(res.mode);
@@ -123,7 +141,7 @@ export function App() {
         setSaveStatus('error');
       }
     }, 700);
-  }, [user, googleUser]);
+  }, [user, currentUser]);
 
   // Handle Welcome Screen actions
   const handleContinueExisting = () => {
@@ -133,7 +151,7 @@ export function App() {
   };
 
   const handleCreateNewWorld = (landscape: LandscapeType) => {
-    const newWorld = createDefaultWorld(landscape, googleUser?.id || user?.id);
+    const newWorld = createDefaultWorld(landscape, currentUser?.id || user?.id);
     setWorld(newWorld);
     setShowWelcome(false);
     youtubeAudio.play();
@@ -390,10 +408,35 @@ export function App() {
 
   const handleManualSave = async () => {
     setSaveStatus('saving');
-    const res = await saveWorld(world, user, googleUser);
+    const res = await saveWorld(world, user, currentUser);
     setSaveStatus(res.success ? 'saved' : 'error');
     setSaveMode(res.mode);
   };
+
+  const handleTriggerSanta = useCallback(() => {
+    if (!canvasRef.current) return;
+    const animType = canvasRef.current.triggerSantaAnimation(() => {
+      setSantaToast(null);
+    });
+
+    if (animType === 'sky') {
+      setSantaToast({
+        title: '🎅 Santa & Rudolph Flying Across The Sky! ✨',
+        subtitle: 'Listen to the soaring sleigh bells and stardust over the snowy peaks!',
+        type: 'sky',
+      });
+    } else {
+      setSantaToast({
+        title: '🤫 Santa Sneaking Secretly Behind The Houses... 🏡',
+        subtitle: 'Watch his lantern swing gently behind the cozy village cabins and pine trees!',
+        type: 'ground',
+      });
+    }
+
+    window.setTimeout(() => {
+      setSantaToast((prev) => (prev ? null : prev));
+    }, 7000);
+  }, []);
 
   // Find currently selected object data
   const selectedObject = world.placedObjects.find((o) => o.id === selectedObjectId) || null;
@@ -431,9 +474,36 @@ export function App() {
         onOpenAuth={() => setIsAuthModalOpen(true)}
         onResetCamera={() => canvasRef.current?.resetCamera()}
         user={user}
-        googleUser={googleUser}
+        currentUser={currentUser}
         dailyGiftAvailable={dailyGiftAvailable}
+        onTriggerSanta={handleTriggerSanta}
       />
+
+      {/* Magical Santa Animation Active Notification Banner */}
+      {santaToast && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 pointer-events-auto max-w-lg w-[92vw] sm:w-auto animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className="winter-panel-gold px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border-[#e5c783]/60 bg-[#0e1c2e]/95 backdrop-blur-md">
+            <span className="text-2xl sm:text-3xl animate-bounce">
+              {santaToast.type === 'sky' ? '🛷' : '🏮'}
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs sm:text-sm font-bold text-[#e5c783] font-serif-display truncate">
+                {santaToast.title}
+              </div>
+              <div className="text-[11px] sm:text-xs text-[#cfdbe5] leading-tight">
+                {santaToast.subtitle}
+              </div>
+            </div>
+            <button
+              onClick={() => setSantaToast(null)}
+              className="text-[#91a1b1] hover:text-white p-1 text-xs cursor-pointer ml-1"
+              title="Close"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 3. Ergonomic Bottom Builder Dock (Zero Viewport Occlusion) */}
       <BottomDock
@@ -476,12 +546,12 @@ export function App() {
         />
       )}
 
-      {/* 5. Daily Gift Modal (Supports unlocking 22 Secret Gifts & direct placement) */}
+      {/* 5. Daily Gift Modal */}
       <GiftModal
         isOpen={isGiftModalOpen}
         onClose={() => setIsGiftModalOpen(false)}
         user={user}
-        googleUser={googleUser}
+        currentUser={currentUser}
         worldId={world.id}
         unlockedAssetIds={world.unlockedAssetIds}
         onGiftClaimed={handleGiftClaimed}
@@ -501,32 +571,23 @@ export function App() {
         }
       />
 
-      {/* 7. Auth / Google Cloud Persistence Modal */}
+      {/* 7. Local Account / Cloud Persistence Modal */}
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
-        user={user}
-        googleUser={googleUser}
+        currentUser={currentUser}
         onUserChanged={async (newUser) => {
-          setUser(newUser);
+          setCurrentUser(newUser);
           if (newUser) {
-            const cloudWorld = await loadWorld(newUser, googleUser);
-            if (cloudWorld) {
-              setWorld(cloudWorld);
-            }
-          }
-        }}
-        onGoogleUserChanged={async (newGoogleUser) => {
-          setGoogleUser(newGoogleUser);
-          if (newGoogleUser) {
-            const cloudWorld = await loadWorld(user, newGoogleUser);
+            const cloudWorld = await loadWorld(user, newUser);
             if (cloudWorld) {
               setWorld(cloudWorld);
             } else {
-              // sync current world to newly connected Google Cloud
-              saveWorld(world, user, newGoogleUser);
+              saveWorld(world, user, newUser);
             }
             setSaveMode('cloud');
+          } else {
+            setSaveMode('local');
           }
         }}
         onManualSync={handleManualSave}

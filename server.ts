@@ -11,6 +11,15 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
+// Anti-caching middleware: ensure browser never uses stale cached API or HTML data
+app.use((_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  next();
+});
+
 // Ensure persistent data directory exists
 const DATA_DIR = path.join(__dirname, '.data');
 if (!fs.existsSync(DATA_DIR)) {
@@ -19,6 +28,32 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const WORLDS_FILE = path.join(DATA_DIR, 'worlds.json');
 const REWARDS_FILE = path.join(DATA_DIR, 'daily_rewards.json');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+
+// Clear server-side cache and persistent data
+app.all('/api/clear-cache', (_req: Request, res: Response) => {
+  try {
+    if (fs.existsSync(DATA_DIR)) {
+      const files = fs.readdirSync(DATA_DIR);
+      for (const file of files) {
+        fs.unlinkSync(path.join(DATA_DIR, file));
+      }
+    }
+    return res.json({ success: true, message: 'Server cache and data cleared successfully.' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Helper to hash password
+function serverHash(text: string): string {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = (hash << 5) - hash + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return 'pw_' + Math.abs(hash).toString(36);
+}
 
 // Helper to read JSON file safely
 function readJsonFile<T>(filePath: string, fallback: T): T {
@@ -43,7 +78,59 @@ function writeJsonFile<T>(filePath: string, data: T) {
 }
 
 // API Routes
-// 1. Get user world by Google User ID / Account ID
+// Auth 1: Register Account
+app.post('/api/auth/register', (req: Request, res: Response) => {
+  const { email, nickname, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ success: false, error: 'Email and password required' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanNick = (nickname || cleanEmail.split('@')[0]).trim();
+  const users = readJsonFile<Record<string, any>>(USERS_FILE, {});
+
+  if (users[cleanEmail]) {
+    return res.status(409).json({ success: false, error: 'Account already exists with this email. Please sign in.' });
+  }
+
+  const userId = 'usr_' + Math.random().toString(36).substring(2, 10);
+  const avatar = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanNick)}&backgroundColor=0d1723`;
+  const newUser = {
+    id: userId,
+    email: cleanEmail,
+    nickname: cleanNick,
+    passwordHash: serverHash(password),
+    avatar,
+    createdAt: new Date().toISOString(),
+  };
+
+  users[cleanEmail] = newUser;
+  writeJsonFile(USERS_FILE, users);
+
+  const { passwordHash: _, ...userSafe } = newUser;
+  return res.json({ success: true, user: userSafe });
+});
+
+// Auth 2: Login Account
+app.post('/api/auth/login', (req: Request, res: Response) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ success: false, error: 'Email and password required' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const users = readJsonFile<Record<string, any>>(USERS_FILE, {});
+  const user = users[cleanEmail];
+
+  if (!user || user.passwordHash !== serverHash(password)) {
+    return res.status(401).json({ success: false, error: 'Invalid email or password.' });
+  }
+
+  const { passwordHash: _, ...userSafe } = user;
+  return res.json({ success: true, user: userSafe });
+});
+
+// 1. Get user world by User ID
 app.get('/api/worlds/:userId', (req: Request, res: Response) => {
   const { userId } = req.params;
   const worlds = readJsonFile<Record<string, any>>(WORLDS_FILE, {});
