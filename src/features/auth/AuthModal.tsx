@@ -36,13 +36,14 @@ export const AuthModal: React.FC<Props> = ({
   });
   const [showClientIdInput, setShowClientIdInput] = useState<boolean>(false);
 
-  // Initialize GIS if client ID is configured
+  // Initialize GIS in English if client ID is configured
   useEffect(() => {
     const activeClientId = customClientId.trim() || googleClientId.trim();
     if (isOpen && typeof window !== 'undefined' && (window as any).google?.accounts?.id && activeClientId) {
       try {
         (window as any).google.accounts.id.initialize({
           client_id: activeClientId,
+          locale: 'en',
           callback: async (response: any) => {
             if (response.credential) {
               setLoading(true);
@@ -59,18 +60,6 @@ export const AuthModal: React.FC<Props> = ({
             }
           },
         });
-
-        const container = document.getElementById('googleSignInBtnContainer');
-        if (container) {
-          container.innerHTML = '';
-          (window as any).google.accounts.id.renderButton(container, {
-            theme: 'outline',
-            size: 'large',
-            width: 300,
-            text: 'signin_with',
-            shape: 'pill',
-          });
-        }
       } catch (err) {
         console.warn('Google Identity GIS error:', err);
       }
@@ -93,6 +82,7 @@ export const AuthModal: React.FC<Props> = ({
       try {
         (window as any).google.accounts.id.initialize({
           client_id: activeClientId,
+          locale: 'en',
           callback: async (response: any) => {
             if (response.credential) {
               setLoading(true);
@@ -110,21 +100,8 @@ export const AuthModal: React.FC<Props> = ({
           },
         });
 
-        (window as any).google.accounts.id.prompt((notification: any) => {
-          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-            const container = document.getElementById('googleSignInBtnContainer');
-            if (container) {
-              container.innerHTML = '';
-              (window as any).google.accounts.id.renderButton(container, {
-                theme: 'outline',
-                size: 'large',
-                width: 300,
-                text: 'continue_with',
-                shape: 'pill',
-              });
-            }
-          }
-        });
+        // Trigger Google Identity prompt popup in English
+        (window as any).google.accounts.id.prompt();
       } catch (err: any) {
         console.error('Google Sign-In error:', err);
         setErrorMsg(err.message || 'Error triggering Google Sign-In.');
@@ -293,8 +270,6 @@ export const AuthModal: React.FC<Props> = ({
                 </svg>
                 <span>Sign in with Google</span>
               </button>
-
-              <div id="googleSignInBtnContainer" className="flex justify-center min-h-[0px]" />
 
               {showClientIdInput && (
                 <div className="pt-2 border-t border-white/10 text-left space-y-1 animate-in fade-in duration-200">
