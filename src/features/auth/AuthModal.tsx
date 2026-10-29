@@ -27,47 +27,112 @@ export const AuthModal: React.FC<Props> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim();
+  const [customClientId, setCustomClientId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('mcw_google_client_id_override') || googleClientId || '';
+    } catch {
+      return googleClientId || '';
+    }
+  });
+  const [showClientIdInput, setShowClientIdInput] = useState<boolean>(false);
 
+  // Initialize GIS if client ID is configured
   useEffect(() => {
-    if (isOpen && typeof window !== 'undefined' && (window as any).google?.accounts?.id) {
+    const activeClientId = customClientId.trim() || googleClientId.trim();
+    if (isOpen && typeof window !== 'undefined' && (window as any).google?.accounts?.id && activeClientId) {
       try {
-        if (googleClientId) {
-          (window as any).google.accounts.id.initialize({
-            client_id: googleClientId,
-            callback: async (response: any) => {
-              if (response.credential) {
-                setLoading(true);
-                setErrorMsg(null);
-                const res = await loginWithGoogleCredential(response.credential);
-                setLoading(false);
-                if (res.success && res.user) {
-                  onUserChanged(res.user);
-                  setSuccessMsg(`Welcome, ${res.user.nickname}! Connected with Google.`);
-                  setTimeout(() => onClose(), 1200);
-                } else {
-                  setErrorMsg(res.error || 'Google Sign-In failed.');
-                }
+        (window as any).google.accounts.id.initialize({
+          client_id: activeClientId,
+          callback: async (response: any) => {
+            if (response.credential) {
+              setLoading(true);
+              setErrorMsg(null);
+              const res = await loginWithGoogleCredential(response.credential);
+              setLoading(false);
+              if (res.success && res.user) {
+                onUserChanged(res.user);
+                setSuccessMsg(`Welcome, ${res.user.nickname}! Connected with Google.`);
+                setTimeout(() => onClose(), 1200);
+              } else {
+                setErrorMsg(res.error || 'Google Sign-In failed.');
               }
-            },
-          });
+            }
+          },
+        });
 
-          const container = document.getElementById('googleSignInBtnContainer');
-          if (container) {
-            container.innerHTML = '';
-            (window as any).google.accounts.id.renderButton(container, {
-              theme: 'outline',
-              size: 'large',
-              width: 320,
-              text: 'signin_with',
-              shape: 'pill',
-            });
-          }
+        const container = document.getElementById('googleSignInBtnContainer');
+        if (container) {
+          container.innerHTML = '';
+          (window as any).google.accounts.id.renderButton(container, {
+            theme: 'outline',
+            size: 'large',
+            width: 300,
+            text: 'signin_with',
+            shape: 'pill',
+          });
         }
       } catch (err) {
         console.warn('Google Identity GIS error:', err);
       }
     }
-  }, [isOpen, googleClientId]);
+  }, [isOpen, customClientId, googleClientId]);
+
+  const handleTriggerGoogleSignIn = () => {
+    soundEngine.playClick();
+    setErrorMsg(null);
+
+    const activeClientId = customClientId.trim() || googleClientId.trim();
+
+    if (!activeClientId) {
+      setShowClientIdInput(true);
+      setErrorMsg('Google Sign-In ready! Please enter your Google OAuth Client ID or set VITE_GOOGLE_CLIENT_ID in secrets.');
+      return;
+    }
+
+    if (typeof window !== 'undefined' && (window as any).google?.accounts?.id) {
+      try {
+        (window as any).google.accounts.id.initialize({
+          client_id: activeClientId,
+          callback: async (response: any) => {
+            if (response.credential) {
+              setLoading(true);
+              setErrorMsg(null);
+              const res = await loginWithGoogleCredential(response.credential);
+              setLoading(false);
+              if (res.success && res.user) {
+                onUserChanged(res.user);
+                setSuccessMsg(`Welcome, ${res.user.nickname}! Logged in with Google.`);
+                setTimeout(() => onClose(), 1200);
+              } else {
+                setErrorMsg(res.error || 'Google Sign-In failed.');
+              }
+            }
+          },
+        });
+
+        (window as any).google.accounts.id.prompt((notification: any) => {
+          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+            const container = document.getElementById('googleSignInBtnContainer');
+            if (container) {
+              container.innerHTML = '';
+              (window as any).google.accounts.id.renderButton(container, {
+                theme: 'outline',
+                size: 'large',
+                width: 300,
+                text: 'continue_with',
+                shape: 'pill',
+              });
+            }
+          }
+        });
+      } catch (err: any) {
+        console.error('Google Sign-In error:', err);
+        setErrorMsg(err.message || 'Error triggering Google Sign-In.');
+      }
+    } else {
+      setErrorMsg('Google Identity Services SDK is loading. Please try again in a moment.');
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -213,14 +278,47 @@ export const AuthModal: React.FC<Props> = ({
           /* Sign In / Register Forms */
           <div className="space-y-4">
             {/* Google Sign-In Mode */}
-            <div className="p-3 rounded-xl bg-white/5 border border-white/10 text-center space-y-2">
-              <span className="text-[11px] font-semibold text-amber-200 block uppercase tracking-wider">
-                Google Account Sign-In
-              </span>
-              <div id="googleSignInBtnContainer" className="flex justify-center my-1 min-h-[40px]" />
-              {!googleClientId && (
-                <div className="text-[10px] text-[#91a1b1] leading-tight">
-                  Google Sign-In active. (Optional: Set <span className="text-amber-300 font-mono">VITE_GOOGLE_CLIENT_ID</span> in environment variables for official OAuth button)
+            <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 text-center space-y-2.5">
+              <button
+                type="button"
+                onClick={handleTriggerGoogleSignIn}
+                disabled={loading}
+                className="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-slate-100 text-slate-800 font-semibold text-xs flex items-center justify-center gap-3 transition-all cursor-pointer shadow-md hover:shadow-lg active:scale-95 border border-slate-200"
+              >
+                <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                </svg>
+                <span>Sign in with Google</span>
+              </button>
+
+              <div id="googleSignInBtnContainer" className="flex justify-center min-h-[0px]" />
+
+              {showClientIdInput && (
+                <div className="pt-2 border-t border-white/10 text-left space-y-1 animate-in fade-in duration-200">
+                  <label className="text-[10px] text-amber-200 font-medium block">
+                    Google OAuth Client ID:
+                  </label>
+                  <input
+                    type="text"
+                    value={customClientId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCustomClientId(val);
+                      try {
+                        localStorage.setItem('mcw_google_client_id_override', val);
+                      } catch {
+                        // ignore
+                      }
+                    }}
+                    placeholder="e.g. xxxxx-xxxx.apps.googleusercontent.com"
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-black/60 border border-amber-400/40 text-white text-[11px] outline-none focus:border-amber-300 font-mono"
+                  />
+                  <p className="text-[9px] text-[#91a1b1]">
+                    Or configure <code className="text-amber-300">VITE_GOOGLE_CLIENT_ID</code> in environment variables.
+                  </p>
                 </div>
               )}
             </div>
