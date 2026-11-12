@@ -25,16 +25,16 @@ export default defineConfig(() => {
           start_url: '/',
           icons: [
             {
-              src: 'https://api.dicebear.com/7.x/bottts/svg?seed=xmas_pwa_icon&backgroundColor=0d1723',
-              sizes: '192x192',
+              src: '/pwa-icon.svg',
+              sizes: '192x192 512x512',
               type: 'image/svg+xml',
               purpose: 'any maskable',
             },
             {
-              src: 'https://api.dicebear.com/7.x/bottts/svg?seed=xmas_pwa_icon&backgroundColor=0d1723',
+              src: '/pwa-icon.svg',
               sizes: '512x512',
               type: 'image/svg+xml',
-              purpose: 'any maskable',
+              purpose: 'any',
             },
           ],
         },
