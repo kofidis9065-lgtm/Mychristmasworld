@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, Mountain, Home, Waves, Building2, Play, ArrowRight, ShieldCheck } from 'lucide-react';
+import { Sparkles, Mountain, Home, Waves, Building2, Play, ArrowRight, ShieldCheck, Download, Crown, FerrisWheel } from 'lucide-react';
 import { LandscapeType } from '../../features/world/worldTypes';
 import { soundEngine } from '../../lib/audioSynthesis';
 import { ChristmasCountdown } from '../../features/countdown/ChristmasCountdown';
@@ -8,14 +8,22 @@ import { youtubeAudio } from '../../lib/youtubePlayerService';
 
 interface Props {
   hasExistingWorld: boolean;
+  isProUser?: boolean;
   onContinueExisting: () => void;
   onCreateNewWorld: (landscape: LandscapeType) => void;
+  onOpenProModal?: () => void;
+  onOpenPWAInstall?: () => void;
+  onOpenPrivacyLegal?: () => void;
 }
 
 export const WelcomeScreen: React.FC<Props> = ({
   hasExistingWorld,
+  isProUser = false,
   onContinueExisting,
   onCreateNewWorld,
+  onOpenProModal,
+  onOpenPWAInstall,
+  onOpenPrivacyLegal,
 }) => {
   const [step, setStep] = useState<'welcome' | 'chooseLandscape'>('welcome');
   const [selectedLandscape, setSelectedLandscape] = useState<LandscapeType>('village');
@@ -27,6 +35,7 @@ export const WelcomeScreen: React.FC<Props> = ({
     tagline: string;
     description: string;
     highlights: string[];
+    isPro?: boolean;
   }[] = [
     {
       id: 'village',
@@ -60,6 +69,15 @@ export const WelcomeScreen: React.FC<Props> = ({
       description: 'A bustling urban Christmas square flanked by lighted skyscrapers, avenues, street lights, and snow plazas.',
       highlights: ['Illuminated skyscraper windows', 'Plaza grid', 'Metropolitan skyline'],
     },
+    {
+      id: 'wonderworld',
+      name: 'Wonderworld',
+      icon: <Crown className="w-6 h-6 text-amber-400 fill-amber-300" />,
+      tagline: 'London Winter Wonderland Fairground',
+      description: 'Spectacular Christmas amusement park with central ice rink, glowing fairground archways, festive lights, and 30 animated 3D rides!',
+      highlights: ['30 Animated Rides', 'Fairground lights', 'Central Ice Rink'],
+      isPro: true,
+    },
   ];
 
   const handleStartCreation = () => {
@@ -69,6 +87,11 @@ export const WelcomeScreen: React.FC<Props> = ({
   };
 
   const handleConfirmLandscape = (id: LandscapeType) => {
+    if (id === 'wonderworld' && !isProUser) {
+      soundEngine.playClick();
+      if (onOpenProModal) onOpenProModal();
+      return;
+    }
     soundEngine.playPlacement();
     youtubeAudio.play();
     onCreateNewWorld(id);
@@ -82,10 +105,8 @@ export const WelcomeScreen: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d1723] overflow-y-auto">
-      {/* Ambient Winter Background Gradient & Star Dust */}
+      {/* Ambient Winter Background Gradient */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1c324b] via-[#0f1b29] to-[#070d14] pointer-events-none opacity-90" />
-
-      {/* Decorative snowfall & glow accents */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[#e5c783]/5 rounded-full blur-3xl pointer-events-none" />
 
       <div className="relative z-10 w-full max-w-4xl text-center py-8">
@@ -109,9 +130,33 @@ export const WelcomeScreen: React.FC<Props> = ({
               My Christmas World
             </h1>
 
-            <p className="text-base sm:text-lg text-[#91a1b1] max-w-xl mx-auto mb-8 font-light leading-relaxed">
+            <p className="text-base sm:text-lg text-[#91a1b1] max-w-xl mx-auto mb-6 font-light leading-relaxed">
               Step into your personal digital winter universe. Create, decorate, collect daily gifts, and build a lasting 3D Christmas diorama.
             </p>
+
+            {/* PWA Banner Requirement: No Downloads. Just Christmas Magic. App in 1 magic click on Android and iOS */}
+            {onOpenPWAInstall && (
+              <div className="mb-8 w-full max-w-md mx-auto p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 via-[#102920] to-emerald-950/80 border border-emerald-500/40 shadow-xl flex items-center justify-between gap-3 text-left">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-300">
+                    <Download className="w-5 h-5 animate-bounce" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-white">No Downloads. Just Christmas Magic.</h3>
+                    <p className="text-[11px] text-emerald-200">App in 1 magic click on Android and iOS.</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    soundEngine.playClick();
+                    onOpenPWAInstall();
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold shadow cursor-pointer transition-colors whitespace-nowrap"
+                >
+                  Install
+                </button>
+              </div>
+            )}
 
             {/* Actions */}
             <div className="flex flex-col sm:flex-row items-center gap-4 w-full max-w-md justify-center">
@@ -134,15 +179,29 @@ export const WelcomeScreen: React.FC<Props> = ({
               </button>
             </div>
 
-            <div className="mt-12 flex items-center gap-6 text-xs text-[#91a1b1]/70">
+            <div className="mt-12 flex flex-wrap items-center justify-center gap-4 text-xs text-[#91a1b1]/70">
               <span className="flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-[#e5c783]" />
                 Auto-saves persistently
               </span>
               <span>•</span>
-              <span>Daily gift rewards</span>
+              <span>Daily secret gifts</span>
               <span>•</span>
               <span>360° 3D Real-time orbit</span>
+              {onOpenPrivacyLegal && (
+                <>
+                  <span>•</span>
+                  <button
+                    onClick={() => {
+                      soundEngine.playClick();
+                      onOpenPrivacyLegal();
+                    }}
+                    className="text-emerald-400 hover:underline cursor-pointer"
+                  >
+                    Privacy & Legal
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ) : (
@@ -162,26 +221,40 @@ export const WelcomeScreen: React.FC<Props> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
               {landscapes.map((land) => {
                 const isSelected = selectedLandscape === land.id;
+                const isLocked = land.isPro && !isProUser;
+
                 return (
                   <div
                     key={land.id}
                     onClick={() => {
                       soundEngine.playClick();
                       setSelectedLandscape(land.id);
+                      if (isLocked && onOpenProModal) {
+                        onOpenProModal();
+                      }
                     }}
-                    className={`p-5 rounded-2xl cursor-pointer transition-all border ${
+                    className={`p-5 rounded-2xl cursor-pointer transition-all border relative ${
                       isSelected
                         ? 'winter-panel-gold bg-[#16273b]'
+                        : isLocked
+                        ? 'winter-panel bg-[#18150c]/90 border-amber-500/50 hover:border-amber-400'
                         : 'winter-panel hover:border-white/30 bg-[#0f1b29]/80'
                     }`}
                   >
+                    {isLocked && (
+                      <span className="absolute top-3 right-3 px-2.5 py-1 rounded-full bg-amber-400 text-slate-950 font-extrabold text-[10px] shadow flex items-center gap-1">
+                        <Crown className="w-3 h-3 fill-slate-950" />
+                        <span>Pro Plan (€1.99)</span>
+                      </span>
+                    )}
+
                     <div className="flex items-center gap-3 mb-2">
                       <div className="p-2.5 rounded-xl bg-black/40 border border-white/10">
                         {land.icon}
                       </div>
                       <div>
-                        <h3 className="font-bold text-white text-base font-serif-display">
-                          {land.name}
+                        <h3 className="font-bold text-white text-base font-serif-display flex items-center gap-2">
+                          <span>{land.name}</span>
                         </h3>
                         <span className="text-[11px] text-[#e5c783] font-medium">
                           {land.tagline}
@@ -223,7 +296,11 @@ export const WelcomeScreen: React.FC<Props> = ({
                 onClick={() => handleConfirmLandscape(selectedLandscape)}
                 className="py-3 px-8 rounded-xl festive-gradient font-bold text-xs uppercase tracking-wider shadow-xl hover:brightness-105 transition-all cursor-pointer font-serif-display flex items-center gap-2"
               >
-                <span>Enter & Build World</span>
+                <span>
+                  {selectedLandscape === 'wonderworld' && !isProUser
+                    ? 'Unlock Wonderworld (€1.99)'
+                    : 'Enter & Build World'}
+                </span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>

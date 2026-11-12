@@ -6,19 +6,24 @@ import { WelcomeScreen } from './components/welcome/WelcomeScreen';
 import { GiftModal } from './features/gifts/GiftModal';
 import { ImageExportModal } from './features/export/ImageExportModal';
 import { AuthModal } from './features/auth/AuthModal';
+import { ProModal } from './components/modals/ProModal';
+import { PrivacyLegalModal } from './components/modals/PrivacyLegalModal';
+import { PWAInstallModal } from './components/ui/PWAInstallModal';
 import { World, LandscapeType, PlacedObject, TimeOfDay } from './features/world/worldTypes';
 import { createDefaultWorld, saveWorld, loadWorld, DEFAULT_LANDSCAPE_DECORATIONS } from './features/world/worldPersistence';
 import { checkDailyGiftClaimed } from './features/gifts/giftService';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { soundEngine } from './lib/audioSynthesis';
 import { youtubeAudio } from './lib/youtubePlayerService';
+import { usePWAInstall } from './lib/usePWAInstall';
 import { User } from '@supabase/supabase-js';
-import { AppUser, getStoredUser } from './features/auth/userAuthService';
+import { AppUser, getStoredUser, checkProStatus } from './features/auth/userAuthService';
 
 export function App() {
   const [world, setWorld] = useState<World>(() => createDefaultWorld('village'));
   const [user, setUser] = useState<User | null>(null);
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => getStoredUser());
+  const [isProUser, setIsProUser] = useState<boolean>(false);
   const [hasExistingSavedWorld, setHasExistingSavedWorld] = useState<boolean>(false);
   const [showWelcome, setShowWelcome] = useState<boolean>(true);
 
@@ -36,6 +41,13 @@ export function App() {
   const [isGiftModalOpen, setIsGiftModalOpen] = useState<boolean>(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [isProModalOpen, setIsProModalOpen] = useState<boolean>(false);
+  const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState<boolean>(false);
+  const [isPWAInstallModalOpen, setIsPWAInstallModalOpen] = useState<boolean>(false);
+
+  // PWA Hook
+  const { isInstallable, isStandalone, isIOS, installPWA } = usePWAInstall();
+
   const [santaToast, setSantaToast] = useState<{
     title: string;
     subtitle: string;
@@ -45,7 +57,7 @@ export function App() {
   const canvasRef = useRef<WorldCanvasHandle | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
 
-  // 1. Initialize Auth and Load Existing World
+  // 1. Initialize Auth, Pro Status, and Load Existing World
   useEffect(() => {
     const init = async () => {
       let currentUser: User | null = null;
@@ -76,8 +88,13 @@ export function App() {
         }
       }
 
-      // Check if world exists in cloud or local cache
       const storedAppUser = getStoredUser();
+
+      // Check Pro status from server & session
+      const proActive = await checkProStatus(storedAppUser?.id || currentUser?.id || 'guest', storedAppUser?.email || currentUser?.email);
+      setIsProUser(proActive);
+
+      // Check if world exists in cloud or local cache
       const saved = await loadWorld(currentUser, storedAppUser);
       if (saved) {
         setWorld(saved);
@@ -88,18 +105,25 @@ export function App() {
       }
 
       // Check daily gift status
-      const claimed = await checkDailyGiftClaimed(currentUser, 0, storedAppUser?.id);
+      const claimed = await checkDailyGiftClaimed(currentUser, 0, storedAppUser?.id, proActive);
       setDailyGiftAvailable(!claimed);
     };
 
     init();
   }, []);
 
-  // Update daily gift check when user changes
+  // Update daily gift check and Pro status when user changes
   useEffect(() => {
-    checkDailyGiftClaimed(user, 0, currentUser?.id).then((claimed) => {
+    const syncUserStatus = async () => {
+      const activeId = currentUser?.id || user?.id || 'guest';
+      const activeEmail = currentUser?.email || user?.email;
+      const proActive = await checkProStatus(activeId, activeEmail);
+      setIsProUser(proActive);
+
+      const claimed = await checkDailyGiftClaimed(user, 0, currentUser?.id, proActive);
       setDailyGiftAvailable(!claimed);
-    });
+    };
+    syncUserStatus();
   }, [user, currentUser]);
 
   // Autoplay vintage Christmas music on first user gesture
@@ -151,6 +175,10 @@ export function App() {
   };
 
   const handleCreateNewWorld = (landscape: LandscapeType) => {
+    if (landscape === 'wonderworld' && !isProUser) {
+      setIsProModalOpen(true);
+      return;
+    }
     const newWorld = createDefaultWorld(landscape, currentUser?.id || user?.id);
     setWorld(newWorld);
     setShowWelcome(false);
@@ -184,7 +212,7 @@ export function App() {
     [triggerAutoSave]
   );
 
-  // 3. Object Manipulation Actions (Each landscape is saved independently!)
+  // 3. Object Manipulation Actions
   const handlePlaceObjectAt = (position: [number, number, number], assetTypeOverride?: string) => {
     const assetToPlace = assetTypeOverride || placementAssetType;
     if (!assetToPlace) return;
@@ -201,7 +229,7 @@ export function App() {
 
     updateWorldObjects((currentObjects) => [...currentObjects, newObj]);
     setSelectedObjectId(newObj.id);
-    setPlacementAssetType(null); // finish single placement
+    setPlacementAssetType(null);
   };
 
   const handleSelectObject = (id: string | null) => {
@@ -302,16 +330,19 @@ export function App() {
     setIsMovingSelected(false);
   };
 
-  // Independent Landscapes (Request 6): Switch between Village, Mountain, River, City without resetting!
+  // Switch landscapes
   const handleSwitchLandscape = (newLandscape: LandscapeType) => {
+    if (newLandscape === 'wonderworld' && !isProUser) {
+      setIsProModalOpen(true);
+      return;
+    }
+
     setWorld((prevWorld) => {
       const decs = prevWorld.landscapeDecorations || JSON.parse(JSON.stringify(DEFAULT_LANDSCAPE_DECORATIONS));
-      // Save current landscape's objects
       const updatedDecorations = {
         ...decs,
         [prevWorld.landscapeType]: prevWorld.placedObjects || [],
       };
-      // Fetch target landscape's independent objects
       const targetObjects =
         updatedDecorations[newLandscape] ||
         DEFAULT_LANDSCAPE_DECORATIONS[newLandscape] ||
@@ -336,7 +367,6 @@ export function App() {
     setPlacementAssetType(null);
   };
 
-  // When a secret daily gift is revealed, unlock it into the library and place one copy in current landscape!
   const handleGiftClaimed = (newObj: PlacedObject, assetId: string) => {
     setWorld((prevWorld) => {
       const existingUnlocked = prevWorld.unlockedAssetIds || [];
@@ -364,7 +394,11 @@ export function App() {
     });
 
     setSelectedObjectId(newObj.id);
-    setDailyGiftAvailable(false);
+    if (!isProUser) {
+      checkDailyGiftClaimed(user, 0, currentUser?.id, isProUser).then((claimed) => {
+        setDailyGiftAvailable(!claimed);
+      });
+    }
   };
 
   const handleTimeOfDayChange = (time: TimeOfDay) => {
@@ -438,7 +472,6 @@ export function App() {
     }, 7000);
   }, []);
 
-  // Find currently selected object data
   const selectedObject = world.placedObjects.find((o) => o.id === selectedObjectId) || null;
 
   return (
@@ -476,7 +509,11 @@ export function App() {
         user={user}
         currentUser={currentUser}
         dailyGiftAvailable={dailyGiftAvailable}
+        isProUser={isProUser}
         onTriggerSanta={handleTriggerSanta}
+        onOpenProModal={() => setIsProModalOpen(true)}
+        onOpenPWAInstall={() => setIsPWAInstallModalOpen(true)}
+        onOpenPrivacyLegal={() => setIsPrivacyModalOpen(true)}
       />
 
       {/* Magical Santa Animation Active Notification Banner */}
@@ -505,7 +542,7 @@ export function App() {
         </div>
       )}
 
-      {/* 3. Ergonomic Bottom Builder Dock (Zero Viewport Occlusion) */}
+      {/* 3. Builder Dock */}
       <BottomDock
         selectedObject={selectedObject}
         activePlacementAsset={placementAssetType}
@@ -513,6 +550,7 @@ export function App() {
         currentLandscape={world.landscapeType}
         unlockedAssetIds={world.unlockedAssetIds}
         landscapeDecorations={world.landscapeDecorations}
+        isProUser={isProUser}
         onSelectPlacementAsset={(assetId) => {
           setSelectedObjectId(null);
           setIsMovingSelected(false);
@@ -535,14 +573,19 @@ export function App() {
         onSwitchLandscape={handleSwitchLandscape}
         onSetCameraAngle={(angle) => canvasRef.current?.setCinematicAngle(angle)}
         onOpenGifts={() => setIsGiftModalOpen(true)}
+        onOpenProModal={() => setIsProModalOpen(true)}
       />
 
-      {/* 4. Welcome Screen Overlay for First Experience */}
+      {/* 4. Welcome Screen Overlay */}
       {showWelcome && (
         <WelcomeScreen
           hasExistingWorld={hasExistingSavedWorld}
+          isProUser={isProUser}
           onContinueExisting={handleContinueExisting}
           onCreateNewWorld={handleCreateNewWorld}
+          onOpenProModal={() => setIsProModalOpen(true)}
+          onOpenPWAInstall={() => setIsPWAInstallModalOpen(true)}
+          onOpenPrivacyLegal={() => setIsPrivacyModalOpen(true)}
         />
       )}
 
@@ -554,12 +597,14 @@ export function App() {
         currentUser={currentUser}
         worldId={world.id}
         unlockedAssetIds={world.unlockedAssetIds}
+        isProUser={isProUser}
         onGiftClaimed={handleGiftClaimed}
         onPlaceNow={(assetId) => {
           setSelectedObjectId(null);
           setIsMovingSelected(false);
           setPlacementAssetType(assetId);
         }}
+        onOpenProModal={() => setIsProModalOpen(true)}
       />
 
       {/* 6. Image Export Modal */}
@@ -591,6 +636,33 @@ export function App() {
           }
         }}
         onManualSync={handleManualSave}
+      />
+
+      {/* 8. Christmas Pro Plan Modal (€1.99 Paddle Checkout) */}
+      <ProModal
+        isOpen={isProModalOpen}
+        onClose={() => setIsProModalOpen(false)}
+        user={currentUser}
+        onProUnlocked={() => {
+          setIsProUser(true);
+          setDailyGiftAvailable(true);
+        }}
+      />
+
+      {/* 9. Privacy Policy & Legal Modal */}
+      <PrivacyLegalModal
+        isOpen={isPrivacyModalOpen}
+        onClose={() => setIsPrivacyModalOpen(false)}
+      />
+
+      {/* 10. PWA Installation Modal */}
+      <PWAInstallModal
+        isOpen={isPWAInstallModalOpen}
+        onClose={() => setIsPWAInstallModalOpen(false)}
+        installPWA={installPWA}
+        isInstallable={isInstallable}
+        isIOS={isIOS}
+        isStandalone={isStandalone}
       />
     </div>
   );

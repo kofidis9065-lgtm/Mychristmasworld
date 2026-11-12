@@ -1,8 +1,8 @@
-export type LandscapeType = 'village' | 'mountain' | 'river' | 'city';
+export type LandscapeType = 'village' | 'mountain' | 'river' | 'city' | 'wonderworld';
 
 export type TimeOfDay = 'day' | 'sunset' | 'night';
 
-export type AssetCategory = 'structures' | 'nature' | 'decorations' | 'festive';
+export type AssetCategory = 'structures' | 'nature' | 'decorations' | 'festive' | 'amusement';
 
 export interface PlacedObject {
   id: string;
@@ -51,5 +51,6 @@ export interface AssetDefinition {
   defaultScale: [number, number, number];
   isDailyReward?: boolean;
   isSecretGift?: boolean; // Secret gift unlocked exclusively through Daily Gifts
+  isPremium?: boolean; // Christmas Pro exclusive asset
   unlockDay?: number;
 }

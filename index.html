@@ -2,11 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
     <title>My Christmas World</title>
-    <meta name="description" content="Create, decorate, save, and explore your own persistent 3D Christmas wonderland with daily gifts and cinematic winter landscapes." />
+    <meta name="description" content="Create, decorate, save, and explore your own persistent 3D Christmas wonderland with daily secret gifts, Wonderworld fairground, and cinematic winter landscapes." />
+    <meta name="theme-color" content="#0d1723" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Christmas World" />
     <meta property="og:title" content="My Christmas World" />
-    <meta property="og:description" content="Create, decorate, save, and explore your own persistent 3D Christmas wonderland with daily gifts and cinematic winter landscapes." />
+    <meta property="og:description" content="Create, decorate, save, and explore your own persistent 3D Christmas wonderland with daily secret gifts, Wonderworld fairground, and cinematic winter landscapes." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
@@ -15,24 +19,13 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="https://api.dicebear.com/7.x/bottts/svg?seed=xmas_pwa_icon&backgroundColor=0d1723" />
     <!-- Google Identity Services (GIS) Sign-In SDK -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <!-- Official Google H5 Games Ad Placement API SDK (AdSense Publisher ID pub-6972943555103902) -->
-    <script
-      async
-      data-ad-client="ca-pub-6972943555103902"
-      data-ad-frequency-hint="30s"
-      src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
-      crossorigin="anonymous"
-    ></script>
-    <script>
-      window.adsbygoogle = window.adsbygoogle || [];
-      window.adBreak = window.adConfig = function(o) { window.adsbygoogle.push(o); };
-    </script>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

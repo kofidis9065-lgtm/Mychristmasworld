@@ -7,6 +7,7 @@ export interface AppUser {
   avatar: string;
   createdAt: string;
   provider?: 'local' | 'google';
+  isPro?: boolean;
 }
 
 export function parseJwt(token: string): any {
@@ -297,4 +298,54 @@ export async function loadWorldFromCloudBackend(userId: string): Promise<any | n
     console.warn('Could not load from cloud backend:', err);
   }
   return null;
+}
+
+export async function checkProStatus(userId: string, email?: string): Promise<boolean> {
+  // Check local cache first
+  const storedUser = getStoredUser();
+  if (storedUser && (storedUser.id === userId || storedUser.email === email) && storedUser.isPro) {
+    return true;
+  }
+
+  // Check server backend
+  try {
+    const res = await fetch(`/api/user/pro-status/${encodeURIComponent(userId)}?email=${encodeURIComponent(email || '')}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.isPro) {
+        if (storedUser) {
+          const updated = { ...storedUser, isPro: true };
+          setStoredUser(updated);
+        }
+        return true;
+      }
+    }
+  } catch (err) {
+    console.warn('Pro status check error:', err);
+  }
+
+  return storedUser?.isPro || false;
+}
+
+export async function grantProToUser(userId: string, email?: string): Promise<boolean> {
+  const storedUser = getStoredUser();
+  if (storedUser) {
+    const updated = { ...storedUser, isPro: true };
+    setStoredUser(updated);
+  }
+
+  try {
+    const res = await fetch('/api/user/grant-pro', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, email }),
+    });
+    if (res.ok) {
+      return true;
+    }
+  } catch (err) {
+    console.warn('Grant pro error:', err);
+  }
+
+  return true;
 }

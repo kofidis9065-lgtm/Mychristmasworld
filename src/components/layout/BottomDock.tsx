@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   Plus,
   Compass,
   Move,
@@ -18,6 +20,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Lock,
+  Crown,
 } from 'lucide-react';
 import { ASSET_CATALOG, isAssetUnlocked } from '../../game/assets/assetCatalog';
 import { PlacedObject, LandscapeType } from '../../features/world/worldTypes';
@@ -30,6 +33,7 @@ interface Props {
   currentLandscape: LandscapeType;
   unlockedAssetIds?: string[];
   landscapeDecorations?: Record<LandscapeType, PlacedObject[]>;
+  isProUser?: boolean;
   onSelectPlacementAsset: (assetId: string | null) => void;
   onConfirmPlacementAtCenter?: () => void;
   onCancelPlacement: () => void;
@@ -43,6 +47,7 @@ interface Props {
   onSwitchLandscape: (landscape: LandscapeType) => void;
   onSetCameraAngle: (angle: 'overview' | 'close' | 'top') => void;
   onOpenGifts: () => void;
+  onOpenProModal?: () => void;
 }
 
 export const BottomDock: React.FC<Props> = ({
@@ -52,6 +57,7 @@ export const BottomDock: React.FC<Props> = ({
   currentLandscape,
   unlockedAssetIds,
   landscapeDecorations,
+  isProUser = false,
   onSelectPlacementAsset,
   onConfirmPlacementAtCenter,
   onCancelPlacement,
@@ -65,22 +71,86 @@ export const BottomDock: React.FC<Props> = ({
   onSwitchLandscape,
   onSetCameraAngle,
   onOpenGifts,
+  onOpenProModal,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'catalog' | 'landscapes' | 'camera'>('catalog');
-  const [catalogFilter, setCatalogFilter] = useState<'all' | 'nature' | 'structures' | 'festive' | 'secrets'>('all');
+  const [catalogFilter, setCatalogFilter] = useState<'all' | 'nature' | 'structures' | 'festive' | 'amusement' | 'secrets'>('all');
+
+  // PC Scroll & Drag Controls for Asset Catalog
+  const catalogScrollRef = useRef<HTMLDivElement | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(true);
+  const isPointerDownRef = useRef(false);
+  const startXRef = useRef(0);
+  const scrollLeftStartRef = useRef(0);
 
   const filteredAssets = ASSET_CATALOG.filter((a) => {
     if (catalogFilter === 'secrets') return a.isSecretGift;
     if (catalogFilter === 'all') return true;
     return a.category === catalogFilter;
   }).sort((a, b) => {
-    const aUnlocked = isAssetUnlocked(a.id, unlockedAssetIds);
-    const bUnlocked = isAssetUnlocked(b.id, unlockedAssetIds);
+    const aUnlocked = isAssetUnlocked(a.id, unlockedAssetIds, isProUser);
+    const bUnlocked = isAssetUnlocked(b.id, unlockedAssetIds, isProUser);
     if (aUnlocked && !bUnlocked) return -1;
     if (!aUnlocked && bUnlocked) return 1;
     return 0;
   });
+
+  // Check scroll boundary state
+  const checkScrollBoundaries = () => {
+    if (!catalogScrollRef.current) return;
+    const { scrollLeft, scrollWidth, clientWidth } = catalogScrollRef.current;
+    setCanScrollLeft(scrollLeft > 2);
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 2);
+  };
+
+  useEffect(() => {
+    checkScrollBoundaries();
+    const el = catalogScrollRef.current;
+    if (el) {
+      el.addEventListener('scroll', checkScrollBoundaries);
+      window.addEventListener('resize', checkScrollBoundaries);
+      return () => {
+        el.removeEventListener('scroll', checkScrollBoundaries);
+        window.removeEventListener('resize', checkScrollBoundaries);
+      };
+    }
+  }, [filteredAssets, activeTab, isCollapsed]);
+
+  // Handle smooth scroll via Left/Right PC buttons
+  const handleScrollBy = (amount: number) => {
+    soundEngine.playClick();
+    if (catalogScrollRef.current) {
+      catalogScrollRef.current.scrollBy({ left: amount, behavior: 'smooth' });
+    }
+  };
+
+  // Handle PC Mouse Wheel horizontal scroll conversion
+  const handleWheel = (e: React.WheelEvent) => {
+    if (catalogScrollRef.current && (e.deltaY !== 0 || e.deltaX !== 0)) {
+      catalogScrollRef.current.scrollLeft += (e.deltaY || e.deltaX) * 1.2;
+    }
+  };
+
+  // Handle PC Mouse Click & Drag horizontal sliding
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (!catalogScrollRef.current) return;
+    isPointerDownRef.current = true;
+    startXRef.current = e.clientX - catalogScrollRef.current.offsetLeft;
+    scrollLeftStartRef.current = catalogScrollRef.current.scrollLeft;
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!isPointerDownRef.current || !catalogScrollRef.current) return;
+    const x = e.clientX - catalogScrollRef.current.offsetLeft;
+    const walk = (x - startXRef.current) * 1.5;
+    catalogScrollRef.current.scrollLeft = scrollLeftStartRef.current - walk;
+  };
+
+  const handlePointerUpOrLeave = () => {
+    isPointerDownRef.current = false;
+  };
 
   return (
     <aside
@@ -175,7 +245,7 @@ export const BottomDock: React.FC<Props> = ({
                       <span>{isMovingSelected ? 'Done Move' : 'Move'}</span>
                     </button>
 
-                    {/* Precise Nudge Arrow Buttons (Solves all move issues!) */}
+                    {/* Precise Nudge Arrow Buttons */}
                     {onNudgeSelected && (
                       <div className="flex items-center gap-0.5 p-0.5 rounded-xl bg-white/5 border border-white/10">
                         <button
@@ -244,7 +314,7 @@ export const BottomDock: React.FC<Props> = ({
                       <RotateCw className="w-3.5 h-3.5" />
                     </button>
 
-                    {/* Scale Controls: visible on mobile & tablet */}
+                    {/* Scale Controls */}
                     <div className="flex items-center gap-1 px-2 py-1 rounded-xl bg-white/5 text-[11px] text-[#91a1b1]">
                       <span className="hidden xs:inline">Size:</span>
                       <button
@@ -382,8 +452,8 @@ export const BottomDock: React.FC<Props> = ({
 
                   {/* Filter Pills if Catalog is active */}
                   {activeTab === 'catalog' && (
-                    <div className="flex items-center gap-1 text-[11px] overflow-x-auto scrollbar-none">
-                      {(['all', 'nature', 'structures', 'festive', 'secrets'] as const).map((filter) => (
+                    <div className="flex items-center gap-1 text-[11px] overflow-x-auto py-0.5 scrollbar-thin">
+                      {(['all', 'nature', 'structures', 'festive', 'amusement', 'secrets'] as const).map((filter) => (
                         <button
                           key={filter}
                           onClick={() => {
@@ -396,106 +466,185 @@ export const BottomDock: React.FC<Props> = ({
                               : 'text-[#91a1b1] hover:text-white'
                           }`}
                         >
-                          {filter === 'secrets' ? '🎁 Secret Gifts' : filter}
+                          {filter === 'secrets' ? '🎁 Secret Gifts' : filter === 'amusement' ? '🎡 Attractions' : filter}
                         </button>
                       ))}
                     </div>
                   )}
                 </div>
 
-                {/* Tab Content 1: Catalog Shelf */}
+                {/* Tab Content 1: Catalog Shelf with Full PC Arrow Navigation & Mouse Drag / Wheel Scroll */}
                 {activeTab === 'catalog' && (
-                  <div className="flex items-center gap-2 overflow-x-auto py-1 scrollbar-none touch-pan-x">
-                    {filteredAssets.map((asset) => {
-                      const isUnlocked = isAssetUnlocked(asset.id, unlockedAssetIds);
-                      const isActive = activePlacementAsset === asset.id;
+                  <div className="relative flex items-center w-full group/catalog">
+                    {/* PC Scroll Left Arrow Button */}
+                    <button
+                      onClick={() => handleScrollBy(-280)}
+                      className={`absolute -left-3 z-20 p-2 rounded-full bg-slate-900/95 text-amber-300 border border-amber-400/60 shadow-2xl hover:bg-slate-800 hover:scale-110 active:scale-95 transition-all cursor-pointer ${
+                        canScrollLeft ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                      }`}
+                      title="Scroll assets left"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
 
-                      if (!isUnlocked) {
+                    {/* Scrollable Asset Container (Supports Mouse Wheel + Click&Drag + Arrow Keys) */}
+                    <div
+                      ref={catalogScrollRef}
+                      onWheel={handleWheel}
+                      onPointerDown={handlePointerDown}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={handlePointerUpOrLeave}
+                      onPointerLeave={handlePointerUpOrLeave}
+                      className="flex items-center gap-2 overflow-x-auto py-2 px-1 w-full scrollbar-thin touch-pan-x cursor-grab active:cursor-grabbing select-none"
+                    >
+                      {filteredAssets.map((asset) => {
+                        const isUnlocked = isAssetUnlocked(asset.id, unlockedAssetIds, isProUser);
+                        const isActive = activePlacementAsset === asset.id;
+
+                        if (asset.isPremium && !isProUser) {
+                          return (
+                            <button
+                              key={asset.id}
+                              onClick={() => {
+                                soundEngine.playClick();
+                                if (onOpenProModal) onOpenProModal();
+                              }}
+                              title="Pro Feature: Upgrade to Christmas Pro (€1.99) to unlock 30 animated 3D attractions!"
+                              className="relative shrink-0 flex flex-col items-center justify-center p-2 rounded-xl transition-all cursor-pointer min-w-[76px] bg-gradient-to-b from-[#1b170c] to-[#0d1723] border border-amber-500/50 hover:border-amber-400 active:scale-95 group"
+                            >
+                              <span className="absolute top-1 right-1 p-0.5 rounded-full bg-amber-400 text-slate-950 font-bold shadow">
+                                <Crown className="w-2.5 h-2.5 fill-slate-950" />
+                              </span>
+                              <span className="text-2xl mb-1 filter drop-shadow group-hover:scale-110 transition-transform">
+                                {asset.previewIcon}
+                              </span>
+                              <span className="text-[10px] text-amber-200 text-center line-clamp-1 max-w-[68px] font-bold">
+                                {asset.name}
+                              </span>
+                              <span className="text-[8px] text-amber-300 uppercase font-mono">
+                                PRO 🔒
+                              </span>
+                            </button>
+                          );
+                        }
+
+                        if (!isUnlocked) {
+                          return (
+                            <button
+                              key={asset.id}
+                              onClick={() => {
+                                soundEngine.playClick();
+                                onOpenGifts();
+                              }}
+                              title="Secret Gift: Claim in Daily Gifts to unlock for your library!"
+                              className="relative shrink-0 flex flex-col items-center justify-center p-2 rounded-xl transition-all cursor-pointer min-w-[76px] bg-[#0d1723]/90 border border-amber-500/30 hover:border-amber-400/60 hover:bg-[#132131] active:scale-95 group"
+                            >
+                              <span className="absolute top-1 right-1 p-0.5 rounded-full bg-black/60 text-amber-300">
+                                <Lock className="w-2.5 h-2.5" />
+                              </span>
+                              <span className="text-2xl mb-1 filter drop-shadow opacity-75 group-hover:scale-110 transition-transform">
+                                🎁
+                              </span>
+                              <span className="text-[10px] text-amber-200/90 text-center line-clamp-1 max-w-[68px] font-medium">
+                                Secret Gift
+                              </span>
+                              <span className="text-[8px] text-[#91a1b1] uppercase font-mono">
+                                Unlock ➔
+                              </span>
+                            </button>
+                          );
+                        }
+
                         return (
                           <button
                             key={asset.id}
                             onClick={() => {
                               soundEngine.playClick();
-                              onOpenGifts();
+                              if (isActive) {
+                                onCancelPlacement();
+                              } else {
+                                onSelectPlacementAsset(asset.id);
+                              }
                             }}
-                            title="Secret Gift: Claim in Daily Gifts to unlock for your library!"
-                            className="relative shrink-0 flex flex-col items-center justify-center p-2 rounded-xl transition-all cursor-pointer min-w-[74px] bg-[#0d1723]/90 border border-amber-500/30 hover:border-amber-400/60 hover:bg-[#132131] active:scale-95 group"
+                            className={`relative shrink-0 flex flex-col items-center justify-center p-2 rounded-xl transition-all cursor-pointer min-w-[76px] ${
+                              isActive
+                                ? 'festive-gradient scale-105'
+                                : 'bg-white/5 hover:bg-white/10 text-white'
+                            }`}
                           >
-                            <span className="absolute top-1 right-1 p-0.5 rounded-full bg-black/60 text-amber-300">
-                              <Lock className="w-2.5 h-2.5" />
+                            {asset.isPremium && (
+                              <span className="absolute -top-1 -right-1 text-[9px] p-0.5 rounded-full bg-amber-400 text-slate-950 font-bold shadow">
+                                👑
+                              </span>
+                            )}
+                            {asset.isSecretGift && !asset.isPremium && (
+                              <span className="absolute -top-1 -right-1 text-[9px] px-1 rounded-full bg-amber-400 text-black font-bold shadow">
+                                ★
+                              </span>
+                            )}
+                            <span className="text-2xl mb-1 filter drop-shadow">
+                              {asset.previewIcon}
                             </span>
-                            <span className="text-2xl mb-1 filter drop-shadow opacity-75 group-hover:scale-110 transition-transform">
-                              🎁
-                            </span>
-                            <span className="text-[10px] text-amber-200/90 text-center line-clamp-1 max-w-[68px] font-medium">
-                              Secret Gift
-                            </span>
-                            <span className="text-[8px] text-[#91a1b1] uppercase font-mono">
-                              Unlock ➔
+                            <span className="text-[10px] text-center line-clamp-1 max-w-[68px]">
+                              {asset.name}
                             </span>
                           </button>
                         );
-                      }
+                      })}
+                    </div>
 
-                      return (
-                        <button
-                          key={asset.id}
-                          onClick={() => {
-                            soundEngine.playClick();
-                            if (isActive) {
-                              onCancelPlacement();
-                            } else {
-                              onSelectPlacementAsset(asset.id);
-                            }
-                          }}
-                          className={`relative shrink-0 flex flex-col items-center justify-center p-2 rounded-xl transition-all cursor-pointer min-w-[74px] ${
-                            isActive
-                              ? 'festive-gradient scale-105'
-                              : 'bg-white/5 hover:bg-white/10 text-white'
-                          }`}
-                        >
-                          {asset.isSecretGift && (
-                            <span className="absolute -top-1 -right-1 text-[9px] px-1 rounded-full bg-amber-400 text-black font-bold shadow">
-                              ★
-                            </span>
-                          )}
-                          <span className="text-2xl mb-1 filter drop-shadow">
-                            {asset.previewIcon}
-                          </span>
-                          <span className="text-[10px] text-center line-clamp-1 max-w-[68px]">
-                            {asset.name}
-                          </span>
-                        </button>
-                      );
-                    })}
+                    {/* PC Scroll Right Arrow Button */}
+                    <button
+                      onClick={() => handleScrollBy(280)}
+                      className={`absolute -right-3 z-20 p-2 rounded-full bg-slate-900/95 text-amber-300 border border-amber-400/60 shadow-2xl hover:bg-slate-800 hover:scale-110 active:scale-95 transition-all cursor-pointer ${
+                        canScrollRight ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                      }`}
+                      title="Scroll assets right"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
                   </div>
                 )}
 
-                {/* Tab Content 2: Independent Landscapes (Request 6) */}
+                {/* Tab Content 2: Independent Landscapes */}
                 {activeTab === 'landscapes' && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 py-1">
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 py-1">
                     {[
-                      { id: 'village', label: 'Classic Village', icon: '🏡', desc: 'Cozy log chalets & paths' },
-                      { id: 'mountain', label: 'Alpine Mountain', icon: '🏔️', desc: 'Rugged peaks & pine shelves' },
-                      { id: 'river', label: 'Frozen River', icon: '❄️', desc: 'Glacial ice & timber bridge' },
-                      { id: 'city', label: 'Christmas City', icon: '🏙️', desc: 'Skyscrapers & lighted avenue' },
+                      { id: 'village', label: 'Classic Village', icon: '🏡', desc: 'Cozy log chalets & paths', isPro: false },
+                      { id: 'mountain', label: 'Alpine Mountain', icon: '🏔️', desc: 'Rugged peaks & pine shelves', isPro: false },
+                      { id: 'river', label: 'Frozen River', icon: '❄️', desc: 'Glacial ice & timber bridge', isPro: false },
+                      { id: 'city', label: 'Christmas City', icon: '🏙️', desc: 'Skyscrapers & lighted avenue', isPro: false },
+                      { id: 'wonderworld', label: 'Wonderworld', icon: '🎡', desc: 'Spectacular Winter Fairground', isPro: true },
                     ].map((land) => {
                       const isCur = currentLandscape === land.id;
                       const itemCount = landscapeDecorations?.[land.id as LandscapeType]?.length ?? 0;
+                      const isLocked = land.isPro && !isProUser;
 
                       return (
                         <button
                           key={land.id}
                           onClick={() => {
+                            if (isLocked) {
+                              soundEngine.playClick();
+                              if (onOpenProModal) onOpenProModal();
+                              return;
+                            }
                             soundEngine.playPlacement();
                             onSwitchLandscape(land.id as LandscapeType);
                           }}
-                          className={`p-2.5 rounded-xl text-left transition-all cursor-pointer border ${
+                          className={`p-2.5 rounded-xl text-left transition-all cursor-pointer border relative ${
                             isCur
                               ? 'festive-gradient'
+                              : isLocked
+                              ? 'bg-amber-950/20 border-amber-500/40 hover:bg-amber-900/30 text-amber-200'
                               : 'bg-white/5 border-transparent hover:bg-white/10 text-[#91a1b1]'
                           }`}
                         >
+                          {isLocked && (
+                            <span className="absolute top-1.5 right-1.5 p-0.5 rounded-full bg-amber-400 text-slate-950 shadow">
+                              <Crown className="w-3 h-3 fill-slate-950" />
+                            </span>
+                          )}
                           <div className="flex items-center justify-between mb-0.5">
                             <div className="flex items-center gap-1.5">
                               <span className="text-xl">{land.icon}</span>
@@ -503,12 +652,14 @@ export const BottomDock: React.FC<Props> = ({
                                 {land.label}
                               </span>
                             </div>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-black/40 font-mono text-amber-200">
-                              {itemCount} items
-                            </span>
+                            {!isLocked && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-black/40 font-mono text-amber-200">
+                                {itemCount} items
+                              </span>
+                            )}
                           </div>
                           <span className="text-[10px] text-white/80 line-clamp-1">
-                            {land.desc}
+                            {isLocked ? '🔒 Pro (€1.99) - Fairground' : land.desc}
                           </span>
                         </button>
                       );

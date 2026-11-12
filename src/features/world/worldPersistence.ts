@@ -141,6 +141,7 @@ export const DEFAULT_LANDSCAPE_DECORATIONS: Record<LandscapeType, PlacedObject[]
       createdAt: '2026-10-24T00:00:00.000Z',
     },
   ],
+  wonderworld: [],
 };
 
 export function getClaimedDailyGiftAssetIds(): string[] {

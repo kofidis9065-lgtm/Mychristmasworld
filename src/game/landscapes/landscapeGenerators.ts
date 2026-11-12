@@ -387,9 +387,109 @@ function createPerimeterSnowbanks(parentGroup: THREE.Group) {
   }
 }
 
+// 5. Wonderworld Landscape (London Winter Wonderland Fairground)
+export function generateWonderworldLandscape(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'Landscape_Wonderworld';
+
+  // Central Ice Rink Arena
+  const rinkGeo = new THREE.CylinderGeometry(8.5, 8.5, 0.08, 32);
+  const rink = new THREE.Mesh(rinkGeo, materials.frozenIce);
+  rink.position.set(0, 0.04, 0);
+  rink.receiveShadow = true;
+  group.add(rink);
+
+  // Gold Guard Railing around Ice Rink
+  const railGeo = new THREE.TorusGeometry(8.6, 0.08, 8, 32);
+  railGeo.rotateX(Math.PI / 2);
+  const railMat = new THREE.MeshStandardMaterial({
+    color: 0xe5c783,
+    roughness: 0.2,
+    metalness: 0.85,
+  });
+  const rail = new THREE.Mesh(railGeo, railMat);
+  rail.position.set(0, 0.35, 0);
+  group.add(rail);
+
+  // Fairground Cobblestone Pathways radiating out
+  const pathGeo1 = new THREE.PlaneGeometry(5, 34);
+  pathGeo1.rotateX(-Math.PI / 2);
+  const path1 = new THREE.Mesh(pathGeo1, materials.cobblestonePath);
+  path1.position.set(0, 0.015, 0);
+  path1.receiveShadow = true;
+  group.add(path1);
+
+  const pathGeo2 = new THREE.PlaneGeometry(34, 5);
+  pathGeo2.rotateX(-Math.PI / 2);
+  const path2 = new THREE.Mesh(pathGeo2, materials.cobblestonePath);
+  path2.position.set(0, 0.016, 0);
+  path2.receiveShadow = true;
+  group.add(path2);
+
+  // Background Fairground Coaster Track Arches
+  const trackMat = new THREE.MeshStandardMaterial({
+    color: 0xd93838,
+    roughness: 0.4,
+    metalness: 0.6,
+  });
+  const archRadius = 16;
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    if (angle > Math.PI * 0.3 && angle < Math.PI * 0.7) continue; // Leave south entrance open
+
+    const x = Math.cos(angle) * archRadius;
+    const z = Math.sin(angle) * archRadius;
+
+    const pillarGeo = new THREE.CylinderGeometry(0.2, 0.25, 8, 8);
+    const pillar = new THREE.Mesh(pillarGeo, trackMat);
+    pillar.position.set(x, 4, z);
+    group.add(pillar);
+
+    // Blinking fairground light on pillar top
+    const bulbLight = new THREE.PointLight(
+      i % 2 === 0 ? 0xffea42 : 0xff3838,
+      1.2,
+      8
+    );
+    bulbLight.position.set(x, 8.2, z);
+    group.add(bulbLight);
+  }
+
+  // Perimeter Festive Pine Trees with Fairy Lights
+  const treePositions = [
+    [-14, 0, -12], [14, 0, -12], [-15, 0, 10], [15, 0, 10],
+    [-11, 0, -15], [11, 0, -15], [-16, 0, -2], [16, 0, -2]
+  ];
+  treePositions.forEach(([x, y, z]) => {
+    const tree = createChristmasTree();
+    tree.position.set(x, y, z);
+    tree.scale.set(1.1, 1.2, 1.1);
+    group.add(tree);
+  });
+
+  // Perimeter Street Lamps
+  const lampPositions = [
+    [-6, 0, -9], [6, 0, -9],
+    [-9, 0, -6], [9, 0, -6],
+    [-9, 0, 6], [9, 0, 6],
+    [-6, 0, 9], [6, 0, 9],
+  ];
+  lampPositions.forEach(([x, y, z]) => {
+    const lamp = createStreetLamp();
+    lamp.position.set(x, y, z);
+    group.add(lamp);
+  });
+
+  createPerimeterSnowbanks(group);
+  enableShadows(group);
+  return group;
+}
+
 // Landscape generation dispatch
 export function generateLandscape(type: LandscapeType): THREE.Group {
   switch (type) {
+    case 'wonderworld':
+      return generateWonderworldLandscape();
     case 'mountain':
       return generateMountainLandscape();
     case 'river':

@@ -29,6 +29,7 @@ if (!fs.existsSync(DATA_DIR)) {
 const WORLDS_FILE = path.join(DATA_DIR, 'worlds.json');
 const REWARDS_FILE = path.join(DATA_DIR, 'daily_rewards.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const PRO_USERS_FILE = path.join(DATA_DIR, 'pro_users.json');
 
 // Clear server-side cache and persistent data
 app.all('/api/clear-cache', (_req: Request, res: Response) => {
@@ -41,6 +42,84 @@ app.all('/api/clear-cache', (_req: Request, res: Response) => {
     }
     return res.json({ success: true, message: 'Server cache and data cleared successfully.' });
   } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Check user Christmas Pro Plan status
+app.get('/api/user/pro-status/:userId', (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const email = (req.query.email as string || '').toLowerCase().trim();
+  const proUsers = readJsonFile<Record<string, boolean>>(PRO_USERS_FILE, {});
+  const users = readJsonFile<Record<string, any>>(USERS_FILE, {});
+
+  const isPro = Boolean(
+    proUsers[userId] ||
+    (email && proUsers[email]) ||
+    (users[email] && users[email].isPro)
+  );
+
+  return res.json({ success: true, isPro });
+});
+
+// Grant Pro status to user
+app.post('/api/user/grant-pro', (req: Request, res: Response) => {
+  const { userId, email } = req.body;
+  if (!userId && !email) {
+    return res.status(400).json({ success: false, error: 'UserId or email required' });
+  }
+
+  const proUsers = readJsonFile<Record<string, boolean>>(PRO_USERS_FILE, {});
+  if (userId) proUsers[userId] = true;
+  if (email) proUsers[email.toLowerCase().trim()] = true;
+  writeJsonFile(PRO_USERS_FILE, proUsers);
+
+  if (email) {
+    const cleanEmail = email.toLowerCase().trim();
+    const users = readJsonFile<Record<string, any>>(USERS_FILE, {});
+    if (users[cleanEmail]) {
+      users[cleanEmail].isPro = true;
+      writeJsonFile(USERS_FILE, users);
+    }
+  }
+
+  return res.json({ success: true, message: 'Christmas Pro Plan granted successfully' });
+});
+
+// Paddle Webhook Endpoint for Automatic Webhook Verification & Purchase Fulfillment
+app.post('/api/paddle/webhook', (req: Request, res: Response) => {
+  try {
+    const event = req.body;
+    console.log('[Paddle Webhook Received]', event?.event_type || event?.type);
+
+    const eventType = event?.event_type || event?.type || '';
+    const data = event?.data || event;
+
+    // Handle completed transaction or subscription
+    if (eventType.includes('transaction.completed') || eventType.includes('order.created') || eventType.includes('payment.succeeded')) {
+      const customData = data?.custom_data || {};
+      const userId = customData?.userId || customData?.user_id;
+      const customerEmail = (data?.customer?.email || customData?.email || '').toLowerCase().trim();
+
+      const proUsers = readJsonFile<Record<string, boolean>>(PRO_USERS_FILE, {});
+      if (userId) proUsers[userId] = true;
+      if (customerEmail) proUsers[customerEmail] = true;
+      writeJsonFile(PRO_USERS_FILE, proUsers);
+
+      if (customerEmail) {
+        const users = readJsonFile<Record<string, any>>(USERS_FILE, {});
+        if (users[customerEmail]) {
+          users[customerEmail].isPro = true;
+          writeJsonFile(USERS_FILE, users);
+        }
+      }
+
+      console.log(`[Paddle Webhook] Christmas Pro granted for userId=${userId}, email=${customerEmail}`);
+    }
+
+    return res.json({ success: true, received: true });
+  } catch (err: any) {
+    console.error('[Paddle Webhook Error]', err);
     return res.status(500).json({ success: false, error: err.message });
   }
 });

@@ -2,6 +2,13 @@ import * as THREE from 'three';
 
 // Shared materials cache for performance and memory reuse
 const materials = {
+  frozenIce: new THREE.MeshStandardMaterial({
+    color: 0x88ccff,
+    roughness: 0.1,
+    metalness: 0.2,
+    transparent: true,
+    opacity: 0.85,
+  }),
   snow: new THREE.MeshStandardMaterial({
     color: 0xf2f7fc,
     roughness: 0.9,
@@ -1522,6 +1529,647 @@ export function createGoldenAngel(): THREE.Group {
   return group;
 }
 
+// =========================================================================
+// 30 EXCLUSIVE ANIMATED PREMIUM 3D ASSETS (CHRISTMAS PRO PLAN)
+// =========================================================================
+
+export function createProFerrisWheel(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProFerrisWheel';
+
+  // Base A-frame support legs
+  const legGeo = new THREE.CylinderGeometry(0.15, 0.25, 6, 8);
+  const legMat = materials.streetLampMetal;
+  const leg1 = new THREE.Mesh(legGeo, legMat);
+  leg1.position.set(-1.8, 3, 0);
+  leg1.rotation.z = -0.3;
+  const leg2 = new THREE.Mesh(legGeo, legMat);
+  leg2.position.set(1.8, 3, 0);
+  leg2.rotation.z = 0.3;
+  group.add(leg1);
+  group.add(leg2);
+
+  // Wheel Group (rotates)
+  const wheelGroup = new THREE.Group();
+  wheelGroup.position.set(0, 5.5, 0);
+
+  // Outer torus rims
+  const rimGeo = new THREE.TorusGeometry(4, 0.12, 12, 32);
+  const rimMat = materials.goldAccent;
+  const rim1 = new THREE.Mesh(rimGeo, rimMat);
+  rim1.position.z = -0.4;
+  const rim2 = new THREE.Mesh(rimGeo, rimMat);
+  rim2.position.z = 0.4;
+  wheelGroup.add(rim1);
+  wheelGroup.add(rim2);
+
+  // Spokes & Gondolas
+  const gondolas: THREE.Group[] = [];
+  const spokeGeo = new THREE.CylinderGeometry(0.04, 0.04, 8, 6);
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    const spoke = new THREE.Mesh(spokeGeo, rimMat);
+    spoke.rotation.z = angle;
+    wheelGroup.add(spoke);
+
+    // Gondola hanging car
+    const gondola = new THREE.Group();
+    gondola.position.set(Math.cos(angle) * 4, Math.sin(angle) * 4, 0);
+
+    const cabinGeo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+    const cabin = new THREE.Mesh(cabinGeo, i % 2 === 0 ? materials.holidayRed : materials.holidayGreen);
+    gondola.add(cabin);
+
+    const roofGeo = new THREE.ConeGeometry(0.6, 0.4, 4);
+    const roof = new THREE.Mesh(roofGeo, materials.snow);
+    roof.position.y = 0.5;
+    gondola.add(roof);
+
+    wheelGroup.add(gondola);
+    gondolas.push(gondola);
+  }
+
+  group.add(wheelGroup);
+
+  // Animation Update: Rotate wheel, keep gondolas upright
+  group.userData.onUpdate = (elapsed: number) => {
+    const rot = elapsed * 0.4;
+    wheelGroup.rotation.z = rot;
+    gondolas.forEach((g) => {
+      g.rotation.z = -rot;
+    });
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProRollerCoaster(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProRollerCoaster';
+
+  // Coaster track loop ring
+  const trackGeo = new THREE.TorusGeometry(3.5, 0.1, 8, 32);
+  const trackMat = materials.holidayRed;
+  const track = new THREE.Mesh(trackGeo, trackMat);
+  track.position.y = 3.5;
+  track.rotation.x = Math.PI / 2;
+  group.add(track);
+
+  // Supports
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
+    const supp = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.15, 3.5, 6), materials.streetLampMetal);
+    supp.position.set(Math.cos(a) * 3.5, 1.75, Math.sin(a) * 3.5);
+    group.add(supp);
+  }
+
+  // Animated Coaster Car
+  const car = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.5, 0.6), materials.goldAccent);
+  group.add(car);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    const speed = elapsed * 1.5;
+    car.position.x = Math.cos(speed) * 3.5;
+    car.position.z = Math.sin(speed) * 3.5;
+    car.position.y = 3.6 + Math.sin(speed * 2) * 0.4;
+    car.rotation.y = -speed + Math.PI / 2;
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProGrandCarousel(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProGrandCarousel';
+
+  // Base platform
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.4, 0.4, 24), materials.woodTrunk);
+  base.position.y = 0.2;
+  group.add(base);
+
+  // Center column & striped canopy
+  const centerCol = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 3, 16), materials.goldAccent);
+  centerCol.position.y = 1.7;
+  group.add(centerCol);
+
+  const canopyGroup = new THREE.Group();
+  canopyGroup.position.y = 3.2;
+
+  const canopy = new THREE.Mesh(new THREE.ConeGeometry(3.5, 1.2, 16), materials.holidayRed);
+  canopyGroup.add(canopy);
+
+  // Horses on poles
+  const horses: THREE.Mesh[] = [];
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.5, 6), materials.brass);
+    pole.position.set(Math.cos(a) * 2.2, -1.2, Math.sin(a) * 2.2);
+    canopyGroup.add(pole);
+
+    const horse = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.3), materials.goldAccent);
+    horse.position.set(Math.cos(a) * 2.2, -1.2, Math.sin(a) * 2.2);
+    canopyGroup.add(horse);
+    horses.push(horse);
+  }
+
+  group.add(canopyGroup);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    canopyGroup.rotation.y = elapsed * 0.8;
+    horses.forEach((h, idx) => {
+      h.position.y = -1.2 + Math.sin(elapsed * 3 + idx) * 0.25;
+    });
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProExpressTrain(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProExpressTrain';
+
+  // Circular Track
+  const track = new THREE.Mesh(new THREE.TorusGeometry(3.0, 0.08, 8, 32), materials.streetLampMetal);
+  track.position.y = 0.05;
+  track.rotation.x = Math.PI / 2;
+  group.add(track);
+
+  // Locomotive Engine
+  const trainEngine = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 1.2), materials.holidayRed);
+  body.position.y = 0.4;
+  trainEngine.add(body);
+
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.9, 0.6), materials.holidayGreen);
+  cabin.position.set(0, 0.75, -0.3);
+  trainEngine.add(cabin);
+
+  group.add(trainEngine);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    const angle = elapsed * 1.2;
+    trainEngine.position.x = Math.cos(angle) * 3.0;
+    trainEngine.position.z = Math.sin(angle) * 3.0;
+    trainEngine.position.y = 0.05;
+    trainEngine.rotation.y = -angle + Math.PI / 2;
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProBumperCars(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProBumperCars';
+
+  const arena = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.2, 4.5), materials.stoneBase);
+  arena.position.y = 0.1;
+  group.add(arena);
+
+  const car1 = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.4, 0.7), materials.holidayRed);
+  const car2 = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.4, 0.7), materials.baubleCyan);
+  group.add(car1);
+  group.add(car2);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    car1.position.set(Math.sin(elapsed * 2) * 1.2, 0.3, Math.cos(elapsed * 1.5) * 1.2);
+    car1.rotation.y = elapsed * 1.5;
+    car2.position.set(Math.cos(elapsed * 1.8) * 1.2, 0.3, Math.sin(elapsed * 2.2) * 1.2);
+    car2.rotation.y = -elapsed * 1.8;
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProSwingRide(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProSwingRide';
+
+  const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.6, 5, 12), materials.streetLampMetal);
+  tower.position.y = 2.5;
+  group.add(tower);
+
+  const topDisc = new THREE.Group();
+  topDisc.position.y = 4.8;
+
+  const discMesh = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 0.3, 16), materials.goldAccent);
+  topDisc.add(discMesh);
+
+  const chairs: THREE.Mesh[] = [];
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const chair = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), materials.holidayRed);
+    chair.position.set(Math.cos(a) * 2.2, -1.8, Math.sin(a) * 2.2);
+    topDisc.add(chair);
+    chairs.push(chair);
+  }
+
+  group.add(topDisc);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    topDisc.rotation.y = elapsed * 1.8;
+    chairs.forEach((c, idx) => {
+      const a = (idx / 6) * Math.PI * 2;
+      const swingOut = 2.2 + Math.sin(elapsed * 2) * 0.4;
+      c.position.set(Math.cos(a) * swingOut, -1.8 + Math.cos(elapsed * 2) * 0.2, Math.sin(a) * swingOut);
+    });
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProHotAirBalloon(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProHotAirBalloon';
+
+  const balloonGroup = new THREE.Group();
+
+  const sphere = new THREE.Mesh(new THREE.SphereGeometry(2.2, 16, 16), materials.holidayRed);
+  sphere.position.y = 5.5;
+  balloonGroup.add(sphere);
+
+  const basket = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 0.9), materials.timberWall);
+  basket.position.y = 2.5;
+  balloonGroup.add(basket);
+
+  group.add(balloonGroup);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    balloonGroup.position.y = Math.sin(elapsed * 1.2) * 0.8;
+    balloonGroup.rotation.y = elapsed * 0.2;
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProSkatingCouple(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProSkatingCouple';
+
+  const icePedestal = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.2, 0.3, 24), materials.snow);
+  icePedestal.position.y = 0.15;
+  group.add(icePedestal);
+
+  const coupleGroup = new THREE.Group();
+  coupleGroup.position.y = 0.3;
+
+  const skater1 = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.2, 8), materials.holidayRed);
+  skater1.position.x = -0.4;
+  const skater2 = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.1, 8), materials.baubleCyan);
+  skater2.position.x = 0.4;
+
+  coupleGroup.add(skater1);
+  coupleGroup.add(skater2);
+  group.add(coupleGroup);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    coupleGroup.rotation.y = elapsed * 2.0;
+    coupleGroup.position.x = Math.sin(elapsed * 1.5) * 0.6;
+    coupleGroup.position.z = Math.cos(elapsed * 1.5) * 0.6;
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProGingerbreadFunhouse(): THREE.Group {
+  const group = createGingerbreadHouse();
+  group.name = 'ProGingerbreadFunhouse';
+
+  const door = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.1, 0.1), materials.baubleGold);
+  door.position.set(0, 0.65, 1.25);
+  group.add(door);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    door.rotation.y = Math.sin(elapsed * 2.5) * 0.7;
+  };
+
+  return group;
+}
+
+export function createProChurrosCocoaStand(): THREE.Group {
+  const group = createMarketStall();
+  group.name = 'ProChurrosCocoaStand';
+
+  const steam = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 8), materials.snow);
+  steam.position.set(0, 2.2, 0);
+  group.add(steam);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    steam.position.y = 2.2 + Math.sin(elapsed * 3) * 0.3;
+    steam.scale.setScalar(0.8 + Math.sin(elapsed * 4) * 0.3);
+  };
+
+  return group;
+}
+
+export function createProCarnivalGameBooth(): THREE.Group {
+  const group = createMarketStall();
+  group.name = 'ProCarnivalGameBooth';
+
+  const target = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), materials.holidayRed);
+  target.position.set(0, 1.2, 0);
+  group.add(target);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    target.position.x = Math.sin(elapsed * 3) * 0.9;
+  };
+
+  return group;
+}
+
+export function createProClockTower(): THREE.Group {
+  const group = createBellTower();
+  group.name = 'ProClockTower';
+
+  const pendulum = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.15, 2.2, 8), materials.goldAccent);
+  pendulum.position.set(0, 3.5, 0.6);
+  group.add(pendulum);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    pendulum.rotation.z = Math.sin(elapsed * 3.5) * 0.35;
+  };
+
+  return group;
+}
+
+export function createProFireworksLauncher(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProFireworksLauncher';
+
+  const mortar = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 1.2, 12), materials.streetLampMetal);
+  mortar.position.y = 0.6;
+  group.add(mortar);
+
+  const burst = new THREE.Mesh(new THREE.OctahedronGeometry(0.5, 1), materials.starEmissive);
+  burst.position.y = 1.2;
+  group.add(burst);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    const cycle = (elapsed * 2) % 3;
+    if (cycle < 1.8) {
+      burst.position.y = 1.2 + cycle * 4;
+      burst.scale.setScalar(0.5 + cycle * 0.8);
+      burst.visible = true;
+    } else {
+      burst.visible = false;
+    }
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProLaserProjector(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProLaserProjector';
+
+  const box = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.8, 1.0), materials.streetLampMetal);
+  box.position.y = 0.4;
+  group.add(box);
+
+  const beam = new THREE.Mesh(new THREE.ConeGeometry(0.8, 8, 12, 1, true), materials.emissiveWindow);
+  beam.position.y = 4.4;
+  group.add(beam);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    beam.rotation.z = Math.sin(elapsed * 2) * 0.5;
+    beam.rotation.x = Math.cos(elapsed * 1.8) * 0.3;
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProSnowGlobeDome(): THREE.Group {
+  const group = createSnowglobe();
+  group.name = 'ProSnowGlobeDome';
+  group.scale.set(1.5, 1.5, 1.5);
+  return group;
+}
+
+export function createProBrassBand(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProBrassBand';
+
+  const musicians: THREE.Mesh[] = [];
+  for (let i = 0; i < 3; i++) {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.3, 8), materials.holidayRed);
+    m.position.set((i - 1) * 0.9, 0.65, 0);
+    group.add(m);
+    musicians.push(m);
+  }
+
+  group.userData.onUpdate = (elapsed: number) => {
+    musicians.forEach((m, idx) => {
+      m.rotation.z = Math.sin(elapsed * 4 + idx) * 0.15;
+    });
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProReindeerCarousel(): THREE.Group {
+  const group = createProGrandCarousel();
+  group.name = 'ProReindeerCarousel';
+  return group;
+}
+
+export function createProIceSlideSled(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProIceSlideSled';
+
+  const ramp = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.2, 5.0), materials.snow);
+  ramp.position.set(0, 1.5, 0);
+  ramp.rotation.x = -0.3;
+  group.add(ramp);
+
+  const sled = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.3, 1.0), materials.holidayRed);
+  group.add(sled);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    const t = (elapsed * 1.5) % 2;
+    sled.position.set(0, 2.2 - t * 0.8, -2.0 + t * 2.2);
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProCircusTent(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProCircusTent';
+
+  const tent = new THREE.Mesh(new THREE.ConeGeometry(3.5, 3.2, 12), materials.holidayRed);
+  tent.position.y = 1.6;
+  group.add(tent);
+
+  const spot = new THREE.Mesh(new THREE.ConeGeometry(0.6, 5, 8, 1, true), materials.starEmissive);
+  spot.position.y = 4.5;
+  group.add(spot);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    spot.rotation.y = elapsed * 1.2;
+    spot.rotation.z = Math.sin(elapsed) * 0.3;
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProPopcornWagon(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProPopcornWagon';
+
+  const wagon = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.0, 1.6), materials.holidayRed);
+  wagon.position.y = 0.8;
+  group.add(wagon);
+
+  const popcorn = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), materials.goldAccent);
+  popcorn.position.set(0, 1.4, 0);
+  group.add(popcorn);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    popcorn.position.y = 1.4 + Math.abs(Math.sin(elapsed * 8)) * 0.2;
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProStarArch(): THREE.Group {
+  const group = createIlluminatedArch();
+  group.name = 'ProStarArch';
+  return group;
+}
+
+export function createProToySoldierParade(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProToySoldierParade';
+
+  const s1 = createNutcracker();
+  s1.position.x = -1.0;
+  const s2 = createNutcracker();
+  s2.position.x = 1.0;
+  group.add(s1);
+  group.add(s2);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    const z = Math.sin(elapsed * 2) * 1.2;
+    s1.position.z = z;
+    s2.position.z = -z;
+  };
+
+  return group;
+}
+
+export function createProSnowmanJuggler(): THREE.Group {
+  const group = createSnowman();
+  group.name = 'ProSnowmanJuggler';
+
+  const ball1 = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), materials.starEmissive);
+  const ball2 = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), materials.baubleCyan);
+  group.add(ball1);
+  group.add(ball2);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    ball1.position.set(Math.sin(elapsed * 4) * 0.8, 2.5 + Math.cos(elapsed * 4) * 0.6, 0);
+    ball2.position.set(Math.sin(elapsed * 4 + Math.PI) * 0.8, 2.5 + Math.cos(elapsed * 4 + Math.PI) * 0.6, 0);
+  };
+
+  return group;
+}
+
+export function createProLightTunnel(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProLightTunnel';
+
+  for (let i = 0; i < 4; i++) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.6, 0.1, 8, 20), materials.starEmissive);
+    ring.position.z = (i - 1.5) * 1.2;
+    ring.position.y = 1.6;
+    group.add(ring);
+  }
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProAnimatedFountain(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'ProAnimatedFountain';
+
+  const basin = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.5, 0.6, 16), materials.stoneBase);
+  basin.position.y = 0.3;
+  group.add(basin);
+
+  const waterJet = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.8, 2.5, 12), materials.frozenIce);
+  waterJet.position.y = 1.5;
+  group.add(waterJet);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    waterJet.scale.set(1 + Math.sin(elapsed * 4) * 0.2, 1 + Math.cos(elapsed * 3) * 0.3, 1 + Math.sin(elapsed * 4) * 0.2);
+  };
+
+  enableShadows(group);
+  return group;
+}
+
+export function createProWaffleHut(): THREE.Group {
+  const group = createMarketStall();
+  group.name = 'ProWaffleHut';
+
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.4, 0.1), materials.goldAccent);
+  sign.position.set(0, 2.3, 1.1);
+  group.add(sign);
+
+  group.userData.onUpdate = (elapsed: number) => {
+    sign.rotation.y = elapsed * 1.5;
+  };
+
+  return group;
+}
+
+export function createProTreeRide(): THREE.Group {
+  const group = createChristmasTree();
+  group.name = 'ProTreeRide';
+  group.scale.set(1.4, 1.4, 1.4);
+  return group;
+}
+
+export function createProSwanBoat(): THREE.Group {
+  const group = createIceSwan();
+  group.name = 'ProSwanBoat';
+
+  group.userData.onUpdate = (elapsed: number) => {
+    group.position.x = Math.sin(elapsed * 1.0) * 2.2;
+    group.position.z = Math.cos(elapsed * 1.0) * 2.2;
+    group.rotation.y = -elapsed * 1.0 + Math.PI / 2;
+  };
+
+  return group;
+}
+
+export function createProMarshmallowFire(): THREE.Group {
+  const group = createLogCampfire();
+  group.name = 'ProMarshmallowFire';
+  return group;
+}
+
+export function createProFerrisEntrance(): THREE.Group {
+  const group = createCandyCaneArch();
+  group.name = 'ProFerrisEntrance';
+  group.scale.set(1.4, 1.4, 1.4);
+  return group;
+}
+
 // Factory function to instantiate any asset by ID
 export function createAssetObject(assetType: string, colorVariant?: string): THREE.Group {
   switch (assetType) {
@@ -1583,6 +2231,69 @@ export function createAssetObject(assetType: string, colorVariant?: string): THR
       return createSantaMailbox();
     case 'golden_angel':
       return createGoldenAngel();
+
+    // 30 PRO PLAN ASSETS
+    case 'pro_ferris_wheel':
+      return createProFerrisWheel();
+    case 'pro_roller_coaster':
+      return createProRollerCoaster();
+    case 'pro_grand_carousel':
+      return createProGrandCarousel();
+    case 'pro_express_train':
+      return createProExpressTrain();
+    case 'pro_bumper_cars':
+      return createProBumperCars();
+    case 'pro_swing_ride':
+      return createProSwingRide();
+    case 'pro_hot_air_balloon':
+      return createProHotAirBalloon();
+    case 'pro_skating_couple':
+      return createProSkatingCouple();
+    case 'pro_gingerbread_funhouse':
+      return createProGingerbreadFunhouse();
+    case 'pro_churros_cocoa_stand':
+      return createProChurrosCocoaStand();
+    case 'pro_carnival_game_booth':
+      return createProCarnivalGameBooth();
+    case 'pro_clock_tower':
+      return createProClockTower();
+    case 'pro_fireworks_launcher':
+      return createProFireworksLauncher();
+    case 'pro_laser_projector':
+      return createProLaserProjector();
+    case 'pro_snow_globe_dome':
+      return createProSnowGlobeDome();
+    case 'pro_brass_band':
+      return createProBrassBand();
+    case 'pro_reindeer_carousel':
+      return createProReindeerCarousel();
+    case 'pro_ice_slide_sled':
+      return createProIceSlideSled();
+    case 'pro_circus_tent':
+      return createProCircusTent();
+    case 'pro_popcorn_wagon':
+      return createProPopcornWagon();
+    case 'pro_star_arch':
+      return createProStarArch();
+    case 'pro_toy_soldier_parade':
+      return createProToySoldierParade();
+    case 'pro_snowman_juggler':
+      return createProSnowmanJuggler();
+    case 'pro_light_tunnel':
+      return createProLightTunnel();
+    case 'pro_animated_fountain':
+      return createProAnimatedFountain();
+    case 'pro_waffle_hut':
+      return createProWaffleHut();
+    case 'pro_tree_ride':
+      return createProTreeRide();
+    case 'pro_swan_boat':
+      return createProSwanBoat();
+    case 'pro_marshmallow_fire':
+      return createProMarshmallowFire();
+    case 'pro_ferris_entrance':
+      return createProFerrisEntrance();
+
     default:
       return createGiftBox('red');
   }

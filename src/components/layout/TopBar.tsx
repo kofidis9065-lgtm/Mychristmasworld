@@ -16,6 +16,9 @@ import {
   Menu,
   X,
   Trash2,
+  Crown,
+  Download,
+  ShieldCheck,
 } from 'lucide-react';
 import { TimeOfDay } from '../../features/world/worldTypes';
 import { ChristmasCountdown } from '../../features/countdown/ChristmasCountdown';
@@ -44,7 +47,11 @@ interface Props {
   currentUser?: AppUser | null;
   googleUser?: any;
   dailyGiftAvailable: boolean;
+  isProUser?: boolean;
   onTriggerSanta?: () => void;
+  onOpenProModal?: () => void;
+  onOpenPWAInstall?: () => void;
+  onOpenPrivacyLegal?: () => void;
 }
 
 export const TopBar: React.FC<Props> = ({
@@ -65,7 +72,11 @@ export const TopBar: React.FC<Props> = ({
   currentUser,
   googleUser,
   dailyGiftAvailable,
+  isProUser = false,
   onTriggerSanta,
+  onOpenProModal,
+  onOpenPWAInstall,
+  onOpenPrivacyLegal,
 }) => {
   const activeUser = currentUser || googleUser || (user ? { nickname: user.email?.split('@')[0], email: user.email, avatar: '' } : null);
   const [musicState, setMusicState] = useState(youtubeAudio.getState());
@@ -88,7 +99,7 @@ export const TopBar: React.FC<Props> = ({
       <div className="max-w-7xl mx-auto flex flex-col gap-2">
         {/* Main Bar */}
         <div className="flex items-center justify-between gap-2">
-          {/* 1. Left: ONLY 3D Animated Santa Face Icon (Click for Santa 3D Magic Animation!) */}
+          {/* 1. Left: 3D Animated Santa Face Icon & Pro Badge */}
           <div className="pointer-events-auto flex items-center gap-2">
             <button
               type="button"
@@ -109,6 +120,28 @@ export const TopBar: React.FC<Props> = ({
               </span>
             </button>
 
+            {/* Christmas Pro Badge or Upgrade Button */}
+            {isProUser ? (
+              <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-gradient-to-r from-amber-500/20 to-amber-300/10 border border-amber-400/40 text-amber-200 text-xs font-bold">
+                <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-300" />
+                <span>Christmas Pro</span>
+              </div>
+            ) : (
+              onOpenProModal && (
+                <button
+                  onClick={() => {
+                    soundEngine.playClick();
+                    onOpenProModal();
+                  }}
+                  className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-[#e5c783] text-slate-950 text-xs font-extrabold shadow-lg hover:brightness-110 active:scale-95 transition-all cursor-pointer border border-amber-200/50"
+                  title="Upgrade to Christmas Pro Plan for €1.99!"
+                >
+                  <Crown className="w-3.5 h-3.5 text-slate-950 fill-amber-300 animate-pulse" />
+                  <span>Get Pro (€1.99)</span>
+                </button>
+              )
+            )}
+
             {/* Countdown on Desktop */}
             <div className="hidden lg:block">
               <ChristmasCountdown />
@@ -117,6 +150,22 @@ export const TopBar: React.FC<Props> = ({
 
           {/* 2. Right: Action Buttons */}
           <div className="pointer-events-auto flex items-center gap-1.5 sm:gap-2">
+            {/* PWA App Install Button */}
+            {onOpenPWAInstall && (
+              <button
+                onClick={() => {
+                  soundEngine.playClick();
+                  onOpenPWAInstall();
+                }}
+                className="flex items-center gap-1.5 py-1.5 px-2.5 sm:px-3 rounded-xl text-xs font-semibold bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/80 border border-emerald-500/40 transition-all cursor-pointer shadow-lg active:scale-95"
+                title="Install App in 1 Click on Android & iOS"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400 animate-bounce" />
+                <span className="hidden sm:inline">Install App</span>
+                <span className="sm:hidden text-[11px]">App</span>
+              </button>
+            )}
+
             {/* Real Vintage Christmas Audio Player */}
             <button
               onClick={handleToggleMusic}
@@ -146,7 +195,7 @@ export const TopBar: React.FC<Props> = ({
               )}
             </button>
 
-            {/* Daily Gift Button with User Signature Red-Orange Gradient */}
+            {/* Daily Gift Button */}
             <button
               onClick={() => {
                 soundEngine.playClick();
@@ -156,9 +205,9 @@ export const TopBar: React.FC<Props> = ({
             >
               <Gift className={`w-3.5 h-3.5 ${dailyGiftAvailable ? 'animate-bounce' : ''}`} />
               <span className="hidden sm:inline">
-                {dailyGiftAvailable ? 'Daily Gift Ready!' : 'Daily Gift'}
+                {dailyGiftAvailable ? 'Daily Gifts' : 'Gifts'}
               </span>
-              <span className="sm:hidden">Gift</span>
+              <span className="sm:hidden">Gifts</span>
 
               {dailyGiftAvailable && (
                 <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
@@ -340,6 +389,21 @@ export const TopBar: React.FC<Props> = ({
 
             <div className="w-[1px] h-4 bg-white/10 mx-0.5" />
 
+            {/* Privacy & Legal */}
+            {onOpenPrivacyLegal && (
+              <button
+                onClick={() => {
+                  soundEngine.playClick();
+                  onOpenPrivacyLegal();
+                }}
+                title="Privacy Policy, GDPR & Terms"
+                className="p-1.5 rounded-lg text-[#91a1b1] hover:text-white transition-all cursor-pointer flex items-center gap-1"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="text-[10px]">Privacy & Legal</span>
+              </button>
+            )}
+
             {/* Clear Cache & Reset Button */}
             <button
               onClick={() => {
@@ -356,7 +420,7 @@ export const TopBar: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Mobile Menu Panel (Active in both vertical portrait & horizontal landscape mobile modes) */}
+        {/* Mobile Menu Panel */}
         {mobileMenuOpen && (
           <div className="mobile-only-control flex-col max-h-[80vh] overflow-y-auto pointer-events-auto winter-panel-gold rounded-2xl p-3.5 shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200 border-[#e5c783]/50">
             <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/10">
@@ -372,6 +436,36 @@ export const TopBar: React.FC<Props> = ({
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs">
+              {/* Christmas Pro Purchase Button in Mobile Menu */}
+              {!isProUser && onOpenProModal && (
+                <button
+                  onClick={() => {
+                    soundEngine.playClick();
+                    onOpenProModal();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="col-span-2 p-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-[#e5c783] text-slate-950 flex items-center justify-center gap-2 font-extrabold shadow-lg border border-amber-200/50"
+                >
+                  <Crown className="w-4 h-4 text-slate-950 fill-amber-300 animate-pulse" />
+                  <span>Unlock Christmas Pro (€1.99)</span>
+                </button>
+              )}
+
+              {/* PWA App Install Button */}
+              {onOpenPWAInstall && (
+                <button
+                  onClick={() => {
+                    soundEngine.playClick();
+                    onOpenPWAInstall();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="col-span-2 p-2 rounded-xl bg-emerald-950/80 text-emerald-300 flex items-center justify-center gap-2 font-bold border border-emerald-500/40"
+                >
+                  <Download className="w-4 h-4 text-emerald-400 animate-bounce" />
+                  <span>App in 1 magic click (Android & iOS)</span>
+                </button>
+              )}
+
               {/* Sky Atmosphere */}
               <div className="col-span-2 flex items-center justify-between p-2 rounded-xl bg-white/5">
                 <span className="text-[#91a1b1] text-[11px]">Sky Mode:</span>
@@ -385,7 +479,7 @@ export const TopBar: React.FC<Props> = ({
                       timeOfDay === 'night' ? 'festive-gradient' : 'bg-black/30 text-white'
                     }`}
                   >
-                    🌙 Night (Lights On)
+                    🌙 Night
                   </button>
                   <button
                     onClick={() => {
@@ -453,6 +547,21 @@ export const TopBar: React.FC<Props> = ({
                 <Sparkles className="w-4 h-4 text-amber-200 animate-spin" />
                 <span>🎅 Summon Santa Magic (Sky & Village)</span>
               </button>
+
+              {/* Privacy & Legal */}
+              {onOpenPrivacyLegal && (
+                <button
+                  onClick={() => {
+                    soundEngine.playClick();
+                    onOpenPrivacyLegal();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="col-span-2 p-2 rounded-xl bg-white/5 text-emerald-300 flex items-center justify-center gap-2 font-medium"
+                >
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>Privacy Policy & Terms</span>
+                </button>
+              )}
 
               {/* Reset Camera */}
               <button

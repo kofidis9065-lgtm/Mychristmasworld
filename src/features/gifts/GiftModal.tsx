@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { Gift, Sparkles, Check, X, RotateCcw, BookmarkCheck, ArrowRight, Clock, Play } from 'lucide-react';
+import { Gift, Sparkles, Check, X, RotateCcw, BookmarkCheck, ArrowRight, Clock, Crown, Unlock } from 'lucide-react';
 import { AssetDefinition, PlacedObject } from '../world/worldTypes';
-import { getAvailableGiftPool, checkDailyGiftClaimed, claimDailyGift, devResetDailyClaims } from './giftService';
+import { getAvailableGiftPool, checkDailyGiftClaimed, claimDailyGift, devResetDailyClaims, FREE_DAILY_GIFT_LIMIT, getTodayClaimCount } from './giftService';
 import { soundEngine } from '../../lib/audioSynthesis';
 import { User } from '@supabase/supabase-js';
 import { AppUser } from '../auth/userAuthService';
 import { ASSET_CATALOG } from '../../game/assets/assetCatalog';
-import { initGoogleH5Ads, showRewardedAd } from '../../lib/googleH5Ads';
 
 interface Props {
   isOpen: boolean;
@@ -16,8 +15,10 @@ interface Props {
   currentUser?: AppUser | null;
   worldId: string;
   unlockedAssetIds?: string[];
+  isProUser?: boolean;
   onGiftClaimed: (newObject: PlacedObject, assetId: string) => void;
   onPlaceNow?: (assetId: string) => void;
+  onOpenProModal?: () => void;
 }
 
 function getTimeUntilMidnight(): { hours: number; minutes: number; seconds: number } {
@@ -37,10 +38,13 @@ export const GiftModal: React.FC<Props> = ({
   currentUser,
   worldId,
   unlockedAssetIds = [],
+  isProUser = false,
   onGiftClaimed,
   onPlaceNow,
+  onOpenProModal,
 }) => {
   const [alreadyClaimed, setAlreadyClaimed] = useState<boolean>(false);
+  const [todayClaims, setTodayClaims] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [isOpening, setIsOpening] = useState<boolean>(false);
   const [selectedBoxIndex, setSelectedBoxIndex] = useState<number | null>(null);
@@ -49,7 +53,7 @@ export const GiftModal: React.FC<Props> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(getTimeUntilMidnight());
 
-  // Only the developer (kofidis9065@gmail.com) or explicit admin param can see the reset button
+  // Strictly developer (kofidis9065@gmail.com) or explicit admin URL param
   const isDevAdmin =
     currentUser?.email?.toLowerCase() === 'kofidis9065@gmail.com' ||
     user?.email?.toLowerCase() === 'kofidis9065@gmail.com' ||
@@ -62,14 +66,13 @@ export const GiftModal: React.FC<Props> = ({
 
   useEffect(() => {
     if (isOpen) {
-      initGoogleH5Ads();
       checkStatus();
       const interval = setInterval(() => {
         setCountdown(getTimeUntilMidnight());
       }, 1000);
       return () => clearInterval(interval);
     }
-  }, [isOpen, user, currentUser]);
+  }, [isOpen, user, currentUser, isProUser]);
 
   const checkStatus = async () => {
     setLoading(true);
@@ -78,10 +81,13 @@ export const GiftModal: React.FC<Props> = ({
     setSelectedBoxIndex(null);
     setIsOpening(false);
 
-    const claimed = await checkDailyGiftClaimed(user, 0, currentUser?.id);
+    const count = await getTodayClaimCount(user, 0, currentUser?.id);
+    setTodayClaims(count);
+
+    const claimed = await checkDailyGiftClaimed(user, 0, currentUser?.id, isProUser);
     setAlreadyClaimed(claimed);
 
-    // Pick 3 random secret gifts from unrevealed pool (or full pool if all collected)
+    // Pick 3 random secret gifts from unrevealed pool
     const pool = getAvailableGiftPool(unlockedAssetIds);
     const shuffled = [...pool].sort(() => 0.5 - Math.random());
     setGiftPool(shuffled.slice(0, 3));
@@ -89,28 +95,14 @@ export const GiftModal: React.FC<Props> = ({
   };
 
   const handleOpenGift = async (reward: AssetDefinition, boxIdx: number) => {
-    if (alreadyClaimed || isOpening) return;
+    if ((alreadyClaimed && !isProUser) || isOpening) return;
     setIsOpening(true);
     setSelectedBoxIndex(boxIdx);
     setErrorMessage(null);
     soundEngine.playClick();
 
-    // REQUIREMENT #1 & #2: Watch real Google Rewarded Ad and unlock ONLY after official adViewed callback confirms!
-    const adResult = await showRewardedAd('daily_christmas_gift');
-
-    if (!adResult.success) {
-      setIsOpening(false);
-      setSelectedBoxIndex(null);
-      // REQUIREMENT #4 & #9: If ad unavailable, skipped or fails, keep gift locked
-      setErrorMessage(
-        adResult.errorMsg ||
-          'Ads temporarily unavailable. Ensure your AdSense Publisher ID (pub-6972943555103902) has approved H5 Games Ad Placement API access.'
-      );
-      return;
-    }
-
-    // Ad watched completely! Claim daily gift
-    const res = await claimDailyGift(reward.id, worldId, user, 0, currentUser?.id);
+    // Claim daily gift instantly
+    const res = await claimDailyGift(reward.id, worldId, user, 0, currentUser?.id, isProUser);
 
     if (!res.success) {
       setErrorMessage(res.error || 'Could not claim reward');
@@ -121,7 +113,12 @@ export const GiftModal: React.FC<Props> = ({
 
     setClaimedReward(reward);
     setIsOpening(false);
-    setAlreadyClaimed(true);
+
+    const updatedCount = await getTodayClaimCount(user, 0, currentUser?.id);
+    setTodayClaims(updatedCount);
+    if (!isProUser && updatedCount >= FREE_DAILY_GIFT_LIMIT) {
+      setAlreadyClaimed(true);
+    }
 
     // Fanfare sound & confetti
     soundEngine.playGiftFanfare();
@@ -184,11 +181,13 @@ export const GiftModal: React.FC<Props> = ({
           </div>
           <div>
             <h2 className="text-xl sm:text-2xl font-bold font-serif-display text-white tracking-wide flex items-center gap-2">
-              <span>Daily Christmas Gift</span>
+              <span>Secret Christmas Gifts</span>
               <Sparkles className="w-4 h-4 text-[#e5c783]" />
             </h2>
             <p className="text-xs text-[#91a1b1]">
-              Unwrap your free mystery holiday surprise every day!
+              {isProUser
+                ? 'Christmas Pro Plan active: Unlock all 22 Secret Gifts with zero daily limits!'
+                : `Free daily allowance: ${Math.max(0, FREE_DAILY_GIFT_LIMIT - todayClaims)} of ${FREE_DAILY_GIFT_LIMIT} gifts remaining today`}
             </p>
           </div>
         </div>
@@ -230,7 +229,7 @@ export const GiftModal: React.FC<Props> = ({
               </span>
             </div>
 
-            {/* Name & Rich Description */}
+            {/* Name & Description */}
             <h3 className="text-2xl font-bold font-serif-display text-white mb-2 gold-glow">
               {claimedReward.name}
             </h3>
@@ -238,46 +237,72 @@ export const GiftModal: React.FC<Props> = ({
               {claimedReward.description}
             </p>
 
-            {/* Place Directly Action */}
-            <button
-              onClick={handlePlaceDirectly}
-              className="w-full py-3 px-4 rounded-xl festive-gradient font-extrabold text-xs sm:text-sm shadow-xl hover:brightness-110 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 mb-4"
-            >
-              <span>Place in World Now</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            {/* Actions */}
+            <div className="flex flex-col gap-2 mb-4">
+              <button
+                onClick={handlePlaceDirectly}
+                className="w-full py-3 px-4 rounded-xl festive-gradient font-extrabold text-xs sm:text-sm shadow-xl hover:brightness-110 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <span>Place in World Now</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+              {(!alreadyClaimed || isProUser) && (
+                <button
+                  onClick={checkStatus}
+                  className="w-full py-2.5 px-4 rounded-xl bg-white/10 hover:bg-white/15 text-xs text-amber-200 border border-amber-400/30 font-semibold cursor-pointer transition-colors"
+                >
+                  Unwrap Another Secret Gift
+                </button>
+              )}
+            </div>
 
             {/* Countdown timer to tomorrow */}
-            <div className="p-3 rounded-xl bg-black/40 border border-white/10 text-center">
-              <div className="flex items-center justify-center gap-1.5 text-xs text-[#91a1b1] mb-1">
-                <Clock className="w-3.5 h-3.5 text-[#e5c783]" />
-                <span>Next daily gift unlocks in:</span>
+            {!isProUser && (
+              <div className="p-3 rounded-xl bg-black/40 border border-white/10 text-center">
+                <div className="flex items-center justify-center gap-1.5 text-xs text-[#91a1b1] mb-1">
+                  <Clock className="w-3.5 h-3.5 text-[#e5c783]" />
+                  <span>Next daily allowance resets in:</span>
+                </div>
+                <div className="font-mono text-sm font-bold text-[#e5c783]">
+                  {padZero(countdown.hours)}h : {padZero(countdown.minutes)}m : {padZero(countdown.seconds)}s
+                </div>
               </div>
-              <div className="font-mono text-sm font-bold text-[#e5c783]">
-                {padZero(countdown.hours)}h : {padZero(countdown.minutes)}m : {padZero(countdown.seconds)}s
-              </div>
-            </div>
+            )}
           </div>
-        ) : alreadyClaimed ? (
+        ) : alreadyClaimed && !isProUser ? (
           /* ==================================================================== */
-          /* SCREEN: CLAIMED TODAY -> TIMER UNTIL NEXT DAY                        */
+          /* SCREEN: DAILY LIMIT REACHED (3/3 GIFTS)                             */
           /* ==================================================================== */
           <div className="py-4 text-center">
             <div className="inline-flex p-3 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 mb-3">
               <Check className="w-7 h-7" />
             </div>
             <h3 className="text-xl font-bold font-serif-display text-white mb-1">
-              Today's Free Gift Claimed!
+              Today's 3 Secret Gifts Claimed!
             </h3>
             <p className="text-xs text-[#91a1b1] max-w-sm mx-auto mb-5 leading-relaxed">
-              You have already collected today's holiday mystery gift. Come back tomorrow for your next secret decoration!
+              You have collected all 3 daily free mystery gifts. Come back tomorrow for your next batch of secret decorations, or unlock all 22 immediately with Christmas Pro!
             </p>
+
+            {/* Upgrade to Pro Button */}
+            {onOpenProModal && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenProModal();
+                }}
+                className="w-full mb-5 py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-[#e5c783] text-slate-950 font-extrabold text-xs sm:text-sm shadow-xl hover:brightness-110 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 border border-amber-200/50"
+              >
+                <Crown className="w-4 h-4 text-slate-950 fill-amber-300" />
+                <span>Unlock All 22 Secret Gifts with Christmas Pro (€1.99)</span>
+              </button>
+            )}
 
             {/* Live Ticking Countdown Box */}
             <div className="p-5 rounded-2xl bg-gradient-to-b from-[#16273b] to-[#0c1825] border border-[#e5c783]/40 mb-5 shadow-xl text-center">
               <div className="flex items-center justify-center gap-2 text-xs font-semibold text-[#e5c783] mb-3">
                 <Clock className="w-4 h-4 animate-spin" />
-                <span>NEXT DAILY GIFT UNLOCKS IN</span>
+                <span>FREE DAILY ALLOWANCE RESETS IN</span>
               </div>
 
               <div className="flex items-center justify-center gap-3">
@@ -342,17 +367,21 @@ export const GiftModal: React.FC<Props> = ({
           <div>
             <div className="p-2.5 mb-4 rounded-xl bg-amber-500/10 border border-amber-400/30 text-center">
               <p className="text-xs text-amber-200 font-semibold flex items-center justify-center gap-1.5">
-                <Play className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
-                <span>Watch 1 Google Rewarded Ad to unwrap your daily mystery gift:</span>
+                <Unlock className="w-3.5 h-3.5 text-amber-300" />
+                <span>
+                  {isProUser
+                    ? 'Pro Unlimited Access: Pick a box to unlock immediately!'
+                    : `Select a gift box to reveal today's mystery item (${FREE_DAILY_GIFT_LIMIT - todayClaims} left today):`}
+                </span>
               </p>
             </div>
 
             <div className="grid grid-cols-3 gap-3 mb-5">
               {giftPool.map((gift, idx) => {
                 const boxStyles = [
-                  { icon: '🎁', color: 'border-red-500/40 hover:border-red-400 bg-red-950/30', ribbon: 'Ruby Bow' },
-                  { icon: '🎀', color: 'border-emerald-500/40 hover:border-emerald-400 bg-emerald-950/30', ribbon: 'Emerald Ribbon' },
-                  { icon: '📦', color: 'border-amber-500/40 hover:border-amber-400 bg-amber-950/30', ribbon: 'Golden Package' },
+                  { icon: '🎁', color: 'border-red-500/40 hover:border-red-400 bg-red-950/30' },
+                  { icon: '🎀', color: 'border-emerald-500/40 hover:border-emerald-400 bg-emerald-950/30' },
+                  { icon: '📦', color: 'border-amber-500/40 hover:border-amber-400 bg-amber-950/30' },
                 ][idx % 3];
 
                 const isThisOpening = isOpening && selectedBoxIndex === idx;
@@ -378,8 +407,7 @@ export const GiftModal: React.FC<Props> = ({
                     </span>
                     
                     <span className="mt-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400 text-black shadow flex items-center gap-1">
-                      <Play className="w-2.5 h-2.5 fill-black" />
-                      <span>{isThisOpening ? 'Playing Ad...' : 'Watch Ad'}</span>
+                      <span>{isThisOpening ? 'Unwrapping...' : 'Open Gift'}</span>
                     </span>
                   </button>
                 );

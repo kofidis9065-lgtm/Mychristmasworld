@@ -311,6 +311,23 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
         santaSystem.update(delta);
       }
 
+      // Animate 3D assets (Ferris wheel, roller coaster, carousel, train, etc.)
+      const elapsedTime = clock.getElapsedTime();
+      if (placedGroup) {
+        placedGroup.traverse((child) => {
+          if (child.userData && typeof child.userData.onUpdate === 'function') {
+            child.userData.onUpdate(elapsedTime, delta);
+          }
+        });
+      }
+      if (landscapeGroup) {
+        landscapeGroup.traverse((child) => {
+          if (child.userData && typeof child.userData.onUpdate === 'function') {
+            child.userData.onUpdate(elapsedTime, delta);
+          }
+        });
+      }
+
       renderer.render(scene, camera);
       frameId = requestAnimationFrame(tick);
     };
@@ -644,7 +661,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
       meshGroup.position.set(posX, obj.position[1] || 0, posZ);
       meshGroup.rotation.set(obj.rotation[0] || 0, obj.rotation[1] || 0, obj.rotation[2] || 0);
       meshGroup.scale.set(obj.scale[0] || 1, obj.scale[1] || 1, obj.scale[2] || 1);
-      meshGroup.userData = { placedId: obj.id, assetType: obj.assetType };
+      meshGroup.userData = { ...meshGroup.userData, placedId: obj.id, assetType: obj.assetType };
       parent.add(meshGroup);
     });
 

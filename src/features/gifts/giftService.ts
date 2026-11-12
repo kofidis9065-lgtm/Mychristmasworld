@@ -4,6 +4,7 @@ import { ASSET_CATALOG } from '../../game/assets/assetCatalog';
 import { AssetDefinition } from '../world/worldTypes';
 
 const LOCAL_DAILY_GIFTS_KEY = 'mcw_claimed_daily_gifts_v1';
+export const FREE_DAILY_GIFT_LIMIT = 3; // Up to 3 Secret Gifts per day for free users!
 
 export function getTodayDateString(offsetDays: number = 0): string {
   const d = new Date();
@@ -31,22 +32,23 @@ export function getAvailableGiftPool(unlockedAssetIds?: string[]): AssetDefiniti
   return allSecretGifts;
 }
 
-export async function checkDailyGiftClaimed(
+export async function getTodayClaimCount(
   user: User | null,
   offsetDays: number = 0,
   googleUserId?: string
-): Promise<boolean> {
+): Promise<number> {
   const dateKey = getTodayDateString(offsetDays);
+  let count = 0;
 
-  // If Google Cloud logged in, check server API
+  // 1. Check server API if logged in
   if (googleUserId) {
     try {
       const res = await fetch(`/api/daily_rewards/${googleUserId}`);
       if (res.ok) {
         const data = await res.json();
-        if (data.records && Array.isArray(data.records)) {
-          const hasToday = data.records.some((r: any) => r.reward_date === dateKey || r.date === dateKey);
-          if (hasToday) return true;
+        const records = data.rewards || data.records || [];
+        if (Array.isArray(records)) {
+          count = records.filter((r: any) => (r.reward_date === dateKey || r.date === dateKey)).length;
         }
       }
     } catch {
@@ -54,36 +56,34 @@ export async function checkDailyGiftClaimed(
     }
   }
 
-  // If Supabase is configured and user logged in
-  if (isSupabaseConfigured && supabase && user) {
-    try {
-      const { data, error } = await supabase
-        .from('daily_rewards')
-        .select('id')
-        .eq('owner_user_id', user.id)
-        .eq('reward_date', dateKey)
-        .maybeSingle();
-
-      if (!error && data) {
-        return true;
-      }
-    } catch (err) {
-      console.warn('Error checking cloud daily rewards:', err);
-    }
-  }
-
-  // Fallback to local storage
+  // 2. Check local storage
   try {
     const raw = localStorage.getItem(LOCAL_DAILY_GIFTS_KEY);
     if (raw) {
       const list: ClaimedGiftRecord[] = JSON.parse(raw);
-      return list.some(r => r.date === dateKey);
+      const localCount = list.filter(r => r.date === dateKey).length;
+      count = Math.max(count, localCount);
     }
   } catch {
     // ignore
   }
 
-  return false;
+  return count;
+}
+
+export async function checkDailyGiftClaimed(
+  user: User | null,
+  offsetDays: number = 0,
+  googleUserId?: string,
+  isProUser?: boolean
+): Promise<boolean> {
+  // If user has Christmas Pro Plan, they can unlock all 22 Secret Gifts with no daily limits!
+  if (isProUser) {
+    return false;
+  }
+
+  const count = await getTodayClaimCount(user, offsetDays, googleUserId);
+  return count >= FREE_DAILY_GIFT_LIMIT;
 }
 
 export async function claimDailyGift(
@@ -91,24 +91,32 @@ export async function claimDailyGift(
   worldId: string,
   user: User | null,
   offsetDays: number = 0,
-  googleUserId?: string
-): Promise<{ success: boolean; error?: string }> {
+  googleUserId?: string,
+  isProUser?: boolean
+): Promise<{ success: boolean; error?: string; remainingToday?: number }> {
   const dateKey = getTodayDateString(offsetDays);
   const now = new Date().toISOString();
 
-  // Check if already claimed
-  const alreadyClaimed = await checkDailyGiftClaimed(user, offsetDays, googleUserId);
-  if (alreadyClaimed) {
-    return { success: false, error: "Today's gift has already been claimed! Return tomorrow for another surprise." };
+  // Check if daily limit reached
+  if (!isProUser) {
+    const currentCount = await getTodayClaimCount(user, offsetDays, googleUserId);
+    if (currentCount >= FREE_DAILY_GIFT_LIMIT) {
+      return {
+        success: false,
+        error: `Daily limit reached! Free accounts can unlock up to 3 Secret Gifts per day. Upgrade to Christmas Pro for unlimited access!`,
+      };
+    }
   }
 
-  // 1. If Google Cloud logged in
+  // 1. Record in Google / Server Backend
   if (googleUserId) {
     try {
       await fetch(`/api/daily_rewards/${googleUserId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          date: dateKey,
+          assetId,
           record: {
             reward_date: dateKey,
             reward_type: assetId,
@@ -118,77 +126,7 @@ export async function claimDailyGift(
         }),
       });
     } catch (err) {
-      console.warn('Google Cloud claim error, will store locally:', err);
-    }
-  }
-
-  // 2. If Supabase configured and user logged in
-  if (isSupabaseConfigured && supabase && user) {
-    try {
-      const { error } = await supabase.from('daily_rewards').insert([
-        {
-          owner_user_id: user.id,
-          reward_date: dateKey,
-          reward_type: assetId,
-          world_id: worldId.startsWith('world_') ? null : worldId,
-          created_at: now,
-        },
-      ]);
-
-      if (error) {
-        if (error.code === '23505') {
-          return { success: false, error: 'A reward was already recorded for today in the cloud.' };
-        }
-        throw error;
-      }
-    } catch (err: any) {
-      console.warn('Cloud claim error, storing locally:', err);
-    }
-  }
-
-  // 3. Always record in local storage
-  try {
-    const raw = localStorage.getItem(LOCAL_DAILY_GIFTS_KEY);
-    const list: ClaimedGiftRecord[] = raw ? JSON.parse(raw) : [];
-    list.push({
-      date: dateKey,
-      assetId,
-      claimedAt: now,
-    });
-    localStorage.setItem(LOCAL_DAILY_GIFTS_KEY, JSON.stringify(list));
-  } catch (err) {
-    console.error('Failed to save gift locally:', err);
-  }
-
-  return { success: true };
-}
-
-export async function recordAdRewardClaim(
-  assetId: string,
-  worldId: string,
-  user: User | null,
-  googleUserId?: string
-): Promise<{ success: boolean; error?: string }> {
-  const dateKey = getTodayDateString(0) + '_ad_' + Math.random().toString(36).substring(2, 7);
-  const now = new Date().toISOString();
-
-  // 1. If Google Cloud logged in
-  if (googleUserId) {
-    try {
-      await fetch(`/api/daily_rewards/${googleUserId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          record: {
-            reward_date: dateKey,
-            reward_type: assetId,
-            world_id: worldId,
-            claimed_at: now,
-          },
-        }),
-      });
-    } catch {
-      // ignore
+      console.warn('Server claim error, saving locally:', err);
     }
   }
 
@@ -203,13 +141,16 @@ export async function recordAdRewardClaim(
     });
     localStorage.setItem(LOCAL_DAILY_GIFTS_KEY, JSON.stringify(list));
   } catch (err) {
-    console.error('Failed to save ad gift locally:', err);
+    console.error('Failed to save gift locally:', err);
   }
 
-  return { success: true };
+  const newCount = await getTodayClaimCount(user, offsetDays, googleUserId);
+  const remainingToday = Math.max(0, FREE_DAILY_GIFT_LIMIT - newCount);
+
+  return { success: true, remainingToday };
 }
 
-// Dev helper to reset daily claims for rapid testing
+// Dev helper to reset daily claims for testing
 export function devResetDailyClaims(): void {
   try {
     localStorage.removeItem(LOCAL_DAILY_GIFTS_KEY);
