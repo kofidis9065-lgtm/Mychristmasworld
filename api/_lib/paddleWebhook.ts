@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { grantProAccess, revokeProAccess } from './storage';
+import { grantProAccess, revokeProAccess } from './storage.js';
 
 const SIGNATURE_TOLERANCE_SECONDS = 300; // 5 minutes replay window
 

@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { processPaddleWebhook } from '../_lib/paddleWebhook';
+import { processPaddleWebhook } from '../_lib/paddleWebhook.js';
 
 export const config = {
   api: {

@@ -1,4 +1,4 @@
-import { createApiApp } from './_lib/app';
+import { createApiApp } from './_lib/app.js';
 
 export const config = {
   api: {

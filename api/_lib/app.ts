@@ -8,8 +8,8 @@ import {
   clearDataDir,
   grantProAccess,
   checkProAccess,
-} from './storage';
-import { processPaddleWebhook } from './paddleWebhook';
+} from './storage.js';
+import { processPaddleWebhook } from './paddleWebhook.js';
 
 // Helper to hash password
 function serverHash(text: string): string {
