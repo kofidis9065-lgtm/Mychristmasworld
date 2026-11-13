@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/((?!paddle/webhook).*)",
+      "destination": "/api/index"
+    }
+  ]
+}
