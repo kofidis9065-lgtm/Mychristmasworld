@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sparkles, Check, X, ShieldCheck, Ticket, Star, RefreshCw, LogIn } from 'lucide-react';
 import {
   AppUser,
@@ -6,7 +6,7 @@ import {
   confirmPaddleTransaction,
   fetchServerAuthSession,
 } from '../../features/auth/userAuthService';
-import { openPaddleCheckout } from '../../lib/paddleService';
+import { ensurePaddleInitialized, openPaddleCheckout } from '../../lib/paddleService';
 import { soundEngine } from '../../lib/audioSynthesis';
 
 interface Props {
@@ -37,6 +37,16 @@ export const ProModal: React.FC<Props> = ({
   const [loading, setLoading] = useState(false);
   const [verifyingPayment, setVerifyingPayment] = useState(false);
   const [msg, setMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  useEffect(() => {
+    if (isOpen && isGoogleSignedIn) {
+      ensurePaddleInitialized().then((res) => {
+        if (!res.ok && res.error) {
+          console.warn('[ProModal] Paddle preload note:', res.error);
+        }
+      });
+    }
+  }, [isOpen, isGoogleSignedIn]);
 
   if (!isOpen) return null;
 
@@ -108,9 +118,9 @@ export const ProModal: React.FC<Props> = ({
 
     setLoading(true);
     const session = await fetchServerAuthSession();
-    setLoading(false);
 
     if (!session.authenticated || !session.user || session.user.provider !== 'google') {
+      setLoading(false);
       setMsg({
         type: 'info',
         text: 'Please sign in with Google again to verify your session before checkout.',
@@ -122,6 +132,7 @@ export const ProModal: React.FC<Props> = ({
     }
 
     if (session.isPro) {
+      setLoading(false);
       triggerProSuccess();
       setMsg({
         type: 'success',
@@ -130,16 +141,22 @@ export const ProModal: React.FC<Props> = ({
       return;
     }
 
-    openPaddleCheckout({
+    await openPaddleCheckout({
       userId: session.user.id,
       email: session.user.email,
       onSuccess: (transactionId) => {
+        setLoading(false);
         pollForServerConfirmation(transactionId);
       },
+      onClose: () => {
+        setLoading(false);
+      },
       onError: (err) => {
+        setLoading(false);
         setMsg({ type: 'error', text: err });
       },
     });
+    setLoading(false);
   };
 
   const handleRestorePurchase = async () => {
