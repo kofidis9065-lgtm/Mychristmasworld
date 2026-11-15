@@ -7,10 +7,18 @@ import { GiftModal } from './features/gifts/GiftModal';
 import { ImageExportModal } from './features/export/ImageExportModal';
 import { AuthModal } from './features/auth/AuthModal';
 import { ProModal } from './components/modals/ProModal';
-import { PrivacyLegalModal } from './components/modals/PrivacyLegalModal';
+import { PrivacyLegalModal, LegalModalTab } from './components/modals/PrivacyLegalModal';
 import { PWAInstallModal } from './components/ui/PWAInstallModal';
 import { World, LandscapeType, PlacedObject, TimeOfDay } from './features/world/worldTypes';
-import { createDefaultWorld, saveWorld, loadWorld, DEFAULT_LANDSCAPE_DECORATIONS } from './features/world/worldPersistence';
+import {
+  createDefaultWorld,
+  saveWorld,
+  loadWorld,
+  DEFAULT_LANDSCAPE_DECORATIONS,
+  enforceFreeLandscapeAccess,
+  isProOnlyLandscape,
+} from './features/world/worldPersistence';
+import { isAssetUnlocked } from './game/assets/assetCatalog';
 import { checkDailyGiftClaimed } from './features/gifts/giftService';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { soundEngine } from './lib/audioSynthesis';
@@ -25,6 +33,7 @@ export function App() {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => getStoredUser());
   const [isProUser, setIsProUser] = useState<boolean>(false);
   const [hasExistingSavedWorld, setHasExistingSavedWorld] = useState<boolean>(false);
+  const [authHydrated, setAuthHydrated] = useState<boolean>(false);
   const [showWelcome, setShowWelcome] = useState<boolean>(true);
 
   // Interaction State
@@ -43,6 +52,7 @@ export function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isProModalOpen, setIsProModalOpen] = useState<boolean>(false);
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState<boolean>(false);
+  const [legalModalTab, setLegalModalTab] = useState<LegalModalTab>('privacy');
   const [isPWAInstallModalOpen, setIsPWAInstallModalOpen] = useState<boolean>(false);
 
   // PWA Hook
@@ -119,15 +129,18 @@ export function App() {
         window.history.replaceState({}, '', url.pathname + url.search + url.hash);
       }
 
-      // Check if world exists in cloud or local cache
+      // Check if world exists in cloud or local cache, and enforce free landscape fallback if unentitled
       const saved = await loadWorld(currentUser, activeAppUser);
       if (saved) {
-        setWorld(saved);
+        const { world: safeSaved } = enforceFreeLandscapeAccess(saved, proActive);
+        setWorld(safeSaved);
         setHasExistingSavedWorld(true);
         if (activeAppUser) {
           setSaveMode('cloud');
         }
       }
+
+      setAuthHydrated(true);
 
       // Check daily gift status
       const claimed = await checkDailyGiftClaimed(currentUser, 0, activeAppUser?.id, proActive);
@@ -143,11 +156,74 @@ export function App() {
       const proActive = currentUser?.provider === 'google' ? await checkProStatus() : false;
       setIsProUser(proActive);
 
+      if (!proActive) {
+        setWorld((prevWorld) => {
+          const { world: safeWorld, switched } = enforceFreeLandscapeAccess(prevWorld, false);
+          if (switched) {
+            setSelectedObjectId(null);
+            setIsMovingSelected(false);
+            setPlacementAssetType(null);
+          }
+          return safeWorld;
+        });
+      }
+
       const claimed = await checkDailyGiftClaimed(user, 0, currentUser?.id, proActive);
       setDailyGiftAvailable(!claimed);
     };
     syncUserStatus();
   }, [user, currentUser]);
+
+  // Reactive safety guard: prevent unentitled access to Wonderworld or locked Pro placement after auth hydration
+  useEffect(() => {
+    if (!authHydrated || isProUser) return;
+
+    if (isProOnlyLandscape(world.landscapeType)) {
+      setWorld((prevWorld) => {
+        const { world: safeWorld } = enforceFreeLandscapeAccess(prevWorld, false);
+        return safeWorld;
+      });
+      setSelectedObjectId(null);
+      setIsMovingSelected(false);
+      setPlacementAssetType(null);
+    } else if (
+      placementAssetType &&
+      !isAssetUnlocked(placementAssetType, world.unlockedAssetIds, false)
+    ) {
+      setPlacementAssetType(null);
+    }
+  }, [authHydrated, isProUser, world.landscapeType, world.unlockedAssetIds, placementAssetType]);
+
+  // Re-verify authoritative server Pro status when a signed-in Google session regains window focus
+  useEffect(() => {
+    if (!currentUser || currentUser.provider !== 'google') return;
+
+    let lastCheckedAt = 0;
+    const handleFocusRecheck = async () => {
+      const now = Date.now();
+      if (now - lastCheckedAt < 15000) return;
+      lastCheckedAt = now;
+
+      const proActive = await checkProStatus();
+      setIsProUser(proActive);
+      if (!proActive) {
+        setWorld((prevWorld) => {
+          const { world: safeWorld, switched } = enforceFreeLandscapeAccess(prevWorld, false);
+          if (switched) {
+            setSelectedObjectId(null);
+            setIsMovingSelected(false);
+            setPlacementAssetType(null);
+          }
+          return safeWorld;
+        });
+      }
+    };
+
+    window.addEventListener('focus', handleFocusRecheck);
+    return () => {
+      window.removeEventListener('focus', handleFocusRecheck);
+    };
+  }, [currentUser]);
 
   // Autoplay vintage Christmas music on first user gesture
   useEffect(() => {
@@ -240,6 +316,12 @@ export function App() {
     const assetToPlace = assetTypeOverride || placementAssetType;
     if (!assetToPlace) return;
 
+    if (!isAssetUnlocked(assetToPlace, world.unlockedAssetIds, isProUser)) {
+      setPlacementAssetType(null);
+      setIsProModalOpen(true);
+      return;
+    }
+
     const newObj: PlacedObject = {
       id: 'obj_' + Math.random().toString(36).substring(2, 9),
       assetType: assetToPlace,
@@ -325,6 +407,15 @@ export function App() {
 
   const handleDuplicateSelected = () => {
     if (!selectedObjectId) return;
+    const selectedTarget = (world.placedObjects || []).find((o) => o.id === selectedObjectId);
+    if (
+      selectedTarget &&
+      !isAssetUnlocked(selectedTarget.assetType, world.unlockedAssetIds, isProUser)
+    ) {
+      setIsProModalOpen(true);
+      return;
+    }
+
     let newClonedId: string | null = null;
     updateWorldObjects((currentObjects) => {
       const target = currentObjects.find((o) => o.id === selectedObjectId);
@@ -536,7 +627,14 @@ export function App() {
         onTriggerSanta={handleTriggerSanta}
         onOpenProModal={() => setIsProModalOpen(true)}
         onOpenPWAInstall={() => setIsPWAInstallModalOpen(true)}
-        onOpenPrivacyLegal={() => setIsPrivacyModalOpen(true)}
+        onOpenPrivacyLegal={() => {
+          setLegalModalTab('privacy');
+          setIsPrivacyModalOpen(true);
+        }}
+        onOpenRefundPolicy={() => {
+          setLegalModalTab('refund');
+          setIsPrivacyModalOpen(true);
+        }}
       />
 
       {/* Magical Santa Animation Active Notification Banner */}
@@ -575,6 +673,10 @@ export function App() {
         landscapeDecorations={world.landscapeDecorations}
         isProUser={isProUser}
         onSelectPlacementAsset={(assetId) => {
+          if (assetId && !isAssetUnlocked(assetId, world.unlockedAssetIds, isProUser)) {
+            setIsProModalOpen(true);
+            return;
+          }
           setSelectedObjectId(null);
           setIsMovingSelected(false);
           setPlacementAssetType(assetId);
@@ -608,7 +710,14 @@ export function App() {
           onCreateNewWorld={handleCreateNewWorld}
           onOpenProModal={() => setIsProModalOpen(true)}
           onOpenPWAInstall={() => setIsPWAInstallModalOpen(true)}
-          onOpenPrivacyLegal={() => setIsPrivacyModalOpen(true)}
+          onOpenPrivacyLegal={() => {
+            setLegalModalTab('privacy');
+            setIsPrivacyModalOpen(true);
+          }}
+          onOpenRefundPolicy={() => {
+            setLegalModalTab('refund');
+            setIsPrivacyModalOpen(true);
+          }}
         />
       )}
 
@@ -647,22 +756,39 @@ export function App() {
         onUserChanged={async (newUser) => {
           setCurrentUser(newUser);
           if (newUser) {
+            let verifiedPro = false;
             if (newUser.provider === 'google') {
-              const verifiedPro = newUser.isPro !== undefined ? Boolean(newUser.isPro) : await checkProStatus();
-              setIsProUser(verifiedPro);
-            } else {
-              setIsProUser(false);
+              verifiedPro = newUser.isPro !== undefined ? Boolean(newUser.isPro) : await checkProStatus();
             }
+            setIsProUser(verifiedPro);
+
             const cloudWorld = await loadWorld(user, newUser);
             if (cloudWorld) {
-              setWorld(cloudWorld);
+              const { world: safeCloudWorld } = enforceFreeLandscapeAccess(cloudWorld, verifiedPro);
+              setWorld(safeCloudWorld);
+              setHasExistingSavedWorld(true);
             } else {
-              saveWorld(world, user, newUser);
+              const { world: safeLocalWorld } = enforceFreeLandscapeAccess(world, verifiedPro);
+              setWorld(safeLocalWorld);
+              saveWorld(safeLocalWorld, user, newUser);
             }
             setSaveMode('cloud');
           } else {
+            // Immediately revoke active-session Pro access & exit any Pro-only landscape
+            // while preserving the user's saved Wonderworld decorations intact.
             setIsProUser(false);
             setSaveMode('local');
+            setSelectedObjectId(null);
+            setIsMovingSelected(false);
+            setPlacementAssetType(null);
+            setWorld((prevWorld) => {
+              const { world: safeWorld, switched } = enforceFreeLandscapeAccess(prevWorld, false);
+              if (switched) {
+                // Only updates localStorage cache (user & newUser are null), leaving cloud data untouched
+                void saveWorld(safeWorld, null, null);
+              }
+              return safeWorld;
+            });
           }
         }}
         onManualSync={handleManualSave}
@@ -679,16 +805,31 @@ export function App() {
         }}
         onProRevoked={() => {
           setIsProUser(false);
+          setSelectedObjectId(null);
+          setIsMovingSelected(false);
+          setPlacementAssetType(null);
+          setWorld((prevWorld) => {
+            const { world: safeWorld, switched } = enforceFreeLandscapeAccess(prevWorld, false);
+            if (switched) {
+              void saveWorld(safeWorld, user, currentUser);
+            }
+            return safeWorld;
+          });
         }}
         onRequireGoogleAuth={() => {
           setIsProModalOpen(false);
           setIsAuthModalOpen(true);
         }}
+        onOpenRefundPolicy={() => {
+          setLegalModalTab('refund');
+          setIsPrivacyModalOpen(true);
+        }}
       />
 
-      {/* 9. Privacy Policy & Legal Modal */}
+      {/* 9. Privacy Policy, Terms & Refund Policy Modal */}
       <PrivacyLegalModal
         isOpen={isPrivacyModalOpen}
+        initialTab={legalModalTab}
         onClose={() => setIsPrivacyModalOpen(false)}
       />
 

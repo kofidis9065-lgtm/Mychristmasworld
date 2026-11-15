@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Sparkles, Check, X, ShieldCheck, Ticket, Star, RefreshCw, LogIn } from 'lucide-react';
+import { Sparkles, Check, X, ShieldCheck, Ticket, Star, LogIn } from 'lucide-react';
 import {
   AppUser,
   checkProStatus,
@@ -18,6 +18,7 @@ interface Props {
   onProUnlocked?: () => void;
   onProRevoked?: () => void;
   onRequireGoogleAuth?: () => void;
+  onOpenRefundPolicy?: () => void;
 }
 
 export const ProModal: React.FC<Props> = ({
@@ -27,8 +28,9 @@ export const ProModal: React.FC<Props> = ({
   currentUser,
   onProGranted,
   onProUnlocked,
-  onProRevoked,
+  onProRevoked: _onProRevoked,
   onRequireGoogleAuth,
+  onOpenRefundPolicy,
 }) => {
   const activeUser = currentUser || user || null;
   const isGoogleSignedIn = Boolean(
@@ -97,7 +99,7 @@ export const ProModal: React.FC<Props> = ({
     setVerifyingPayment(false);
     setMsg({
       type: 'info',
-      text: 'Your payment confirmation is still processing. Click "Restore Purchase" in a few seconds to sync your Pro access.',
+      text: 'Your payment confirmation is still processing. Your Pro access will appear automatically as soon as confirmation completes.',
     });
   };
 
@@ -159,38 +161,9 @@ export const ProModal: React.FC<Props> = ({
     setLoading(false);
   };
 
-  const handleRestorePurchase = async () => {
-    soundEngine.playClick();
-    if (!isGoogleSignedIn) {
-      setMsg({
-        type: 'info',
-        text: 'Please sign in with Google to restore your Christmas Pro purchase across devices.',
-      });
-      if (onRequireGoogleAuth) {
-        onRequireGoogleAuth();
-      }
-      return;
-    }
-
-    setLoading(true);
-    const isPro = await checkProStatus();
-    setLoading(false);
-
-    if (isPro) {
-      triggerProSuccess();
-      setMsg({ type: 'success', text: 'Christmas Pro Plan restored successfully!' });
-    } else {
-      if (onProRevoked) onProRevoked();
-      setMsg({
-        type: 'info',
-        text: 'No active purchase found for this Google account. Click "Unlock Christmas Pro for €1.99" to upgrade.',
-      });
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-xs select-none animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg rounded-2xl winter-panel-gold p-5 sm:p-7 text-[#edf2f6] shadow-2xl border border-[#e5c783]/60">
+      <div className="relative w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-2xl winter-panel-gold p-5 sm:p-7 text-[#edf2f6] shadow-2xl border border-[#e5c783]/60">
         {/* Close Button */}
         <button
           onClick={onClose}
@@ -304,16 +277,29 @@ export const ProModal: React.FC<Props> = ({
           </button>
         )}
 
-        {/* Secondary Restore & Legal Footer */}
-        <div className="flex items-center justify-between pt-3 border-t border-white/10 text-[11px] text-[#91a1b1]">
-          <button
-            onClick={handleRestorePurchase}
-            disabled={loading || verifyingPayment}
-            className="flex items-center gap-1 hover:text-amber-300 transition-colors cursor-pointer disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading || verifyingPayment ? 'animate-spin' : ''}`} />
-            <span>Restore Purchase</span>
-          </button>
+        {/* Digital Purchase & Refund Notice */}
+        <p className="text-[11px] leading-relaxed text-[#cbd5e1]/85 text-center px-1 mb-3">
+          Christmas Pro is a one-time digital purchase with immediate access to premium content. Once activated, purchases are generally non-refundable, except where required by applicable consumer law or Paddle&apos;s refund policies.{' '}
+          {onOpenRefundPolicy && (
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
+                onClose();
+                onOpenRefundPolicy();
+              }}
+              className="text-amber-300 underline hover:text-amber-200 font-semibold cursor-pointer"
+            >
+              Refund Policy
+            </button>
+          )}
+        </p>
+
+        {/* Legal & Security Footer */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-white/10 text-[11px] text-[#91a1b1]">
+          <span className="text-[10px] text-[#91a1b1]">
+            Automatically linked to your Google account
+          </span>
 
           <div className="flex items-center gap-1 text-[#91a1b1]">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />

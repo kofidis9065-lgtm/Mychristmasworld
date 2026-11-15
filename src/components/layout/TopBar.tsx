@@ -52,6 +52,7 @@ interface Props {
   onOpenProModal?: () => void;
   onOpenPWAInstall?: () => void;
   onOpenPrivacyLegal?: () => void;
+  onOpenRefundPolicy?: () => void;
 }
 
 export const TopBar: React.FC<Props> = ({
@@ -77,6 +78,7 @@ export const TopBar: React.FC<Props> = ({
   onOpenProModal,
   onOpenPWAInstall,
   onOpenPrivacyLegal,
+  onOpenRefundPolicy,
 }) => {
   const activeUser = currentUser || googleUser || (user ? { nickname: user.email?.split('@')[0], email: user.email, avatar: '' } : null);
   const [musicState, setMusicState] = useState(youtubeAudio.getState());
@@ -403,6 +405,18 @@ export const TopBar: React.FC<Props> = ({
                 <span className="text-[10px]">Privacy & Legal</span>
               </button>
             )}
+            {onOpenRefundPolicy && (
+              <button
+                onClick={() => {
+                  soundEngine.playClick();
+                  onOpenRefundPolicy();
+                }}
+                title="Digital Purchase Terms & Refund Policy"
+                className="p-1.5 rounded-lg text-[#91a1b1] hover:text-amber-200 transition-all cursor-pointer flex items-center gap-1"
+              >
+                <span className="text-[10px]">Refund Policy</span>
+              </button>
+            )}
 
             {/* Clear Cache & Reset Button */}
             <button
@@ -548,7 +562,7 @@ export const TopBar: React.FC<Props> = ({
                 <span>🎅 Summon Santa Magic (Sky & Village)</span>
               </button>
 
-              {/* Privacy & Legal */}
+              {/* Privacy & Legal / Refund Policy */}
               {onOpenPrivacyLegal && (
                 <button
                   onClick={() => {
@@ -556,10 +570,22 @@ export const TopBar: React.FC<Props> = ({
                     onOpenPrivacyLegal();
                     setMobileMenuOpen(false);
                   }}
-                  className="col-span-2 p-2 rounded-xl bg-white/5 text-emerald-300 flex items-center justify-center gap-2 font-medium"
+                  className={`${onOpenRefundPolicy ? 'col-span-1' : 'col-span-2'} p-2 rounded-xl bg-white/5 text-emerald-300 flex items-center justify-center gap-1.5 font-medium`}
                 >
                   <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span>Privacy Policy & Terms</span>
+                  <span>Privacy & Legal</span>
+                </button>
+              )}
+              {onOpenRefundPolicy && (
+                <button
+                  onClick={() => {
+                    soundEngine.playClick();
+                    onOpenRefundPolicy();
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`${onOpenPrivacyLegal ? 'col-span-1' : 'col-span-2'} p-2 rounded-xl bg-white/5 text-amber-200 flex items-center justify-center gap-1.5 font-medium`}
+                >
+                  <span>Refund Policy</span>
                 </button>
               )}
 

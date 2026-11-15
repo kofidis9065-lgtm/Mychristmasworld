@@ -14,6 +14,7 @@ interface Props {
   onOpenProModal?: () => void;
   onOpenPWAInstall?: () => void;
   onOpenPrivacyLegal?: () => void;
+  onOpenRefundPolicy?: () => void;
 }
 
 export const WelcomeScreen: React.FC<Props> = ({
@@ -24,6 +25,7 @@ export const WelcomeScreen: React.FC<Props> = ({
   onOpenProModal,
   onOpenPWAInstall,
   onOpenPrivacyLegal,
+  onOpenRefundPolicy,
 }) => {
   const [step, setStep] = useState<'welcome' | 'chooseLandscape'>('welcome');
   const [selectedLandscape, setSelectedLandscape] = useState<LandscapeType>('village');
@@ -199,6 +201,20 @@ export const WelcomeScreen: React.FC<Props> = ({
                     className="text-emerald-400 hover:underline cursor-pointer"
                   >
                     Privacy & Legal
+                  </button>
+                </>
+              )}
+              {onOpenRefundPolicy && (
+                <>
+                  <span>•</span>
+                  <button
+                    onClick={() => {
+                      soundEngine.playClick();
+                      onOpenRefundPolicy();
+                    }}
+                    className="text-amber-300 hover:underline cursor-pointer"
+                  >
+                    Terms & Refund Policy
                   </button>
                 </>
               )}

@@ -6,6 +6,56 @@ import { DEFAULT_FREE_ASSET_IDS } from '../../game/assets/assetCatalog';
 const LOCAL_STORAGE_KEY = 'mcw_saved_world_v1';
 const GUEST_ID = 'guest-local-user';
 
+export const PRO_ONLY_LANDSCAPES: readonly LandscapeType[] = ['wonderworld'];
+
+export function isProOnlyLandscape(landscape: LandscapeType): boolean {
+  return PRO_ONLY_LANDSCAPES.includes(landscape);
+}
+
+/**
+ * Safely switches an unentitled user out of any Pro-only landscape (e.g. 'wonderworld')
+ * back to the default free landscape ('village'), while strictly preserving all placed
+ * objects inside `landscapeDecorations.wonderworld` without deletion or corruption.
+ */
+export function enforceFreeLandscapeAccess(
+  world: World,
+  isProUser: boolean
+): { world: World; switched: boolean } {
+  if (isProUser || !isProOnlyLandscape(world.landscapeType)) {
+    return { world, switched: false };
+  }
+
+  const existingDecorations: Record<LandscapeType, PlacedObject[]> = {
+    village: JSON.parse(JSON.stringify(DEFAULT_LANDSCAPE_DECORATIONS.village)),
+    mountain: JSON.parse(JSON.stringify(DEFAULT_LANDSCAPE_DECORATIONS.mountain)),
+    river: JSON.parse(JSON.stringify(DEFAULT_LANDSCAPE_DECORATIONS.river)),
+    city: JSON.parse(JSON.stringify(DEFAULT_LANDSCAPE_DECORATIONS.city)),
+    wonderworld: [],
+    ...(world.landscapeDecorations || {}),
+  };
+
+  // Preserve current Wonderworld objects cleanly before switching active view to 'village'
+  const currentLandscapeObjects: PlacedObject[] = Array.isArray(world.placedObjects)
+    ? JSON.parse(JSON.stringify(world.placedObjects))
+    : [];
+  existingDecorations[world.landscapeType] = currentLandscapeObjects;
+
+  const fallbackVillageObjects: PlacedObject[] = Array.isArray(existingDecorations.village)
+    ? JSON.parse(JSON.stringify(existingDecorations.village))
+    : JSON.parse(JSON.stringify(DEFAULT_LANDSCAPE_DECORATIONS.village));
+  existingDecorations.village = fallbackVillageObjects;
+
+  return {
+    switched: true,
+    world: {
+      ...world,
+      landscapeType: 'village',
+      placedObjects: fallbackVillageObjects,
+      landscapeDecorations: existingDecorations,
+    },
+  };
+}
+
 export const DEFAULT_LANDSCAPE_DECORATIONS: Record<LandscapeType, PlacedObject[]> = {
   village: [
     {
