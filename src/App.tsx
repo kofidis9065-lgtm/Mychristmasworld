@@ -748,11 +748,12 @@ export function App() {
         }
       />
 
-      {/* 7. Local Account / Cloud Persistence Modal */}
+      {/* 7. Account & Cloud Persistence Modal */}
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         currentUser={currentUser}
+        isProUser={isProUser}
         onUserChanged={async (newUser) => {
           setCurrentUser(newUser);
           if (newUser) {

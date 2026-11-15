@@ -2,7 +2,6 @@ import express, { Request, Response } from 'express';
 import {
   WORLDS_FILE,
   REWARDS_FILE,
-  USERS_FILE,
   readJsonFile,
   writeJsonFile,
   clearDataDir,
@@ -27,16 +26,6 @@ import {
   recordVerifiedPaddlePurchase,
   upsertVerifiedGoogleUserInSupabase,
 } from './supabaseAdmin.js';
-
-// Helper to hash password for optional local-only guest/dev email accounts
-function serverHash(text: string): string {
-  let hash = 0;
-  for (let i = 0; i < text.length; i++) {
-    hash = (hash << 5) - hash + text.charCodeAt(i);
-    hash |= 0;
-  }
-  return 'pw_' + Math.abs(hash).toString(36);
-}
 
 export function createApiApp() {
   const app = express();
@@ -72,8 +61,14 @@ export function createApiApp() {
   // Standard JSON parser for all remaining API routes
   app.use(express.json({ limit: '10mb' }));
 
-  // Clear local non-database cache only
+  // Development-only internal data cache reset (disabled in production)
   app.all('/api/clear-cache', (_req: Request, res: Response) => {
+    if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+      return res.status(403).json({
+        success: false,
+        error: 'Cache reset endpoint is disabled in production.',
+      });
+    }
     try {
       clearDataDir();
       return res.json({ success: true, message: 'Server cache cleared successfully.' });
@@ -351,63 +346,6 @@ export function createApiApp() {
       console.error('[Confirm Transaction Error]', err);
       return res.status(500).json({ success: false, isPro: false, error: err?.message });
     }
-  });
-
-  // Auth 1: Register Local Email Account (does not grant Pro)
-  app.post('/api/auth/register', (req: Request, res: Response) => {
-    const { email, nickname, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ success: false, error: 'Email and password required' });
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanNick = (nickname || cleanEmail.split('@')[0]).trim();
-    const users = readJsonFile<Record<string, any>>(USERS_FILE, {});
-
-    if (users[cleanEmail]) {
-      return res.status(409).json({
-        success: false,
-        error: 'Account already exists with this email. Please sign in.',
-      });
-    }
-
-    const userId = 'usr_' + Math.random().toString(36).substring(2, 10);
-    const avatar = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanNick)}&backgroundColor=0d1723`;
-    const newUser = {
-      id: userId,
-      email: cleanEmail,
-      nickname: cleanNick,
-      passwordHash: serverHash(password),
-      avatar,
-      provider: 'local',
-      isPro: false,
-      createdAt: new Date().toISOString(),
-    };
-
-    users[cleanEmail] = newUser;
-    writeJsonFile(USERS_FILE, users);
-
-    const { passwordHash: _, ...userSafe } = newUser;
-    return res.json({ success: true, user: userSafe });
-  });
-
-  // Auth 2: Login Local Email Account
-  app.post('/api/auth/login', (req: Request, res: Response) => {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ success: false, error: 'Email and password required' });
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const users = readJsonFile<Record<string, any>>(USERS_FILE, {});
-    const user = users[cleanEmail];
-
-    if (!user || user.passwordHash !== serverHash(password)) {
-      return res.status(401).json({ success: false, error: 'Invalid email or password.' });
-    }
-
-    const { passwordHash: _, ...userSafe } = user;
-    return res.json({ success: true, user: { ...userSafe, isPro: false } });
   });
 
   // 1. Get user world by User ID

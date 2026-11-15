@@ -189,7 +189,7 @@ export const PrivacyLegalModal: React.FC<Props> = ({
               <ul className="list-disc list-inside space-y-1 text-[11px] text-[#91a1b1]">
                 <li><strong>Data Stored:</strong> Account email, nickname, avatar, verified purchase entitlement status, and saved 3D village object coordinates.</li>
                 <li><strong>No Behavioral Ad Tracking:</strong> We do not run third-party advertising trackers or sell personal data.</li>
-                <li><strong>Right to Erase (GDPR):</strong> You can delete locally stored data and cached credentials instantly using the <em>&quot;Clear Cache &amp; Reset Storage&quot;</em> button in settings.</li>
+                <li><strong>Right to Erase (GDPR):</strong> You can sign out at any time from the Account menu to end your session, or clear local site data through your browser settings.</li>
               </ul>
             </section>
 

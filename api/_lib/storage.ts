@@ -24,7 +24,6 @@ function resolveDataDir(): string {
 export const DATA_DIR = resolveDataDir();
 export const WORLDS_FILE = path.join(DATA_DIR, 'worlds.json');
 export const REWARDS_FILE = path.join(DATA_DIR, 'daily_rewards.json');
-export const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 export function readJsonFile<T>(filePath: string, fallback: T): T {
   try {

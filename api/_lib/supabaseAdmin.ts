@@ -53,7 +53,7 @@ export interface VerifiedUserRecord {
   emailVerified: boolean;
   nickname: string;
   avatar: string;
-  provider: 'google' | 'local';
+  provider: 'google';
   isPro: boolean;
   createdAt: string;
 }
@@ -181,7 +181,7 @@ export async function getVerifiedUserFromSupabase(
   if (error) {
     throw new Error(`Failed to fetch user: ${error.message}`);
   }
-  if (!userRow) return null;
+  if (!userRow || userRow.provider !== 'google') return null;
 
   const isPro = await checkUserProInSupabase(userRow.user_id, env);
 
@@ -192,7 +192,7 @@ export async function getVerifiedUserFromSupabase(
     emailVerified: Boolean(userRow.email_verified),
     nickname: userRow.nickname || userRow.email.split('@')[0],
     avatar: userRow.avatar_url || '',
-    provider: userRow.provider === 'google' ? 'google' : 'local',
+    provider: 'google',
     isPro,
     createdAt: userRow.created_at,
   };

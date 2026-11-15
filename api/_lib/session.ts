@@ -8,7 +8,7 @@ export interface SessionPayload {
   uid: string;
   sub?: string;
   email: string;
-  provider: 'google' | 'local';
+  provider: 'google';
   iat: number;
   exp: number;
 }
@@ -52,7 +52,7 @@ export function createSessionToken(user: {
   uid: string;
   sub?: string;
   email: string;
-  provider: 'google' | 'local';
+  provider: 'google';
 }): string {
   const now = Math.floor(Date.now() / 1000);
   const payload: SessionPayload = {
@@ -87,7 +87,7 @@ export function verifySessionToken(token: string | undefined): SessionPayload | 
     if (!crypto.timingSafeEqual(expectedSig, actualSig)) return null;
 
     const payload = JSON.parse(fromBase64Url(encodedPayload).toString('utf8')) as SessionPayload;
-    if (!payload || !payload.uid || !payload.email) return null;
+    if (!payload || !payload.uid || !payload.email || payload.provider !== 'google') return null;
     const now = Math.floor(Date.now() / 1000);
     if (!Number.isFinite(payload.exp) || payload.exp < now) return null;
     return payload;
@@ -125,7 +125,7 @@ function shouldUseSecureCookie(req: Request): boolean {
 export function setSessionCookie(
   req: Request,
   res: Response,
-  user: { uid: string; sub?: string; email: string; provider: 'google' | 'local' }
+  user: { uid: string; sub?: string; email: string; provider: 'google' }
 ): void {
   const token = createSessionToken(user);
   const parts = [

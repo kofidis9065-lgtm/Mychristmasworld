@@ -15,7 +15,6 @@ import {
   Sparkles,
   Menu,
   X,
-  Trash2,
   Crown,
   Download,
   ShieldCheck,
@@ -27,7 +26,6 @@ import { User } from '@supabase/supabase-js';
 import { AppUser } from '../../features/auth/userAuthService';
 import { AnimatedSantaIcon } from '../ui/AnimatedSantaIcon';
 import { youtubeAudio } from '../../lib/youtubePlayerService';
-import { clearAllAppCache } from '../../lib/cacheManager';
 
 interface Props {
   timeOfDay: TimeOfDay;
@@ -266,7 +264,7 @@ export const TopBar: React.FC<Props> = ({
                 title={
                   activeUser
                     ? `Account: ${activeUser.nickname || activeUser.email}`
-                    : 'Sign In / Create Account'
+                    : 'Sign In with Google / Guest Mode'
                 }
               >
                 {activeUser?.avatar ? (
@@ -418,19 +416,6 @@ export const TopBar: React.FC<Props> = ({
               </button>
             )}
 
-            {/* Clear Cache & Reset Button */}
-            <button
-              onClick={() => {
-                if (window.confirm('Clear all local cache & browser storage and reload?')) {
-                  clearAllAppCache(true);
-                }
-              }}
-              title="Clear Local Cache & Stored Data"
-              className="p-1.5 rounded-lg text-red-300/70 hover:text-red-300 hover:bg-red-950/30 transition-all cursor-pointer flex items-center gap-1"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span className="text-[10px]">Clear Cache</span>
-            </button>
           </div>
         </div>
 
@@ -615,7 +600,7 @@ export const TopBar: React.FC<Props> = ({
                 <span>{saveMode === 'cloud' ? 'Cloud Save' : 'Save Locally'}</span>
               </button>
 
-              {/* Account Profile / Local User Login */}
+              {/* Account Profile / Google Sign-In */}
               <button
                 onClick={() => {
                   soundEngine.playClick();
@@ -628,21 +613,8 @@ export const TopBar: React.FC<Props> = ({
                 <span>
                   {activeUser
                     ? `Account: ${activeUser.nickname || activeUser.email}`
-                    : 'Sign In / Create Account'}
+                    : 'Sign In with Google / Guest'}
                 </span>
-              </button>
-
-              {/* Clear Cache & Reset App */}
-              <button
-                onClick={() => {
-                  if (window.confirm('Clear all local cache & browser storage and reload?')) {
-                    clearAllAppCache(true);
-                  }
-                }}
-                className="col-span-2 p-2 rounded-xl bg-white/5 hover:bg-red-950/40 text-red-300 flex items-center justify-center gap-2 font-medium text-xs border border-white/5"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Clear Cache & Reset Storage</span>
               </button>
             </div>
           </div>
