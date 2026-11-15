@@ -10,13 +10,36 @@ export type PaddleClientEnv = 'sandbox' | 'production';
 
 const PADDLE_SCRIPT_SRC = 'https://cdn.paddle.com/paddle/v2/paddle.js';
 
-export function getPaddleEnvironment(): PaddleClientEnv {
-  const raw = (import.meta.env.VITE_PADDLE_ENV || 'sandbox').trim().toLowerCase();
-  return raw === 'production' ? 'production' : 'sandbox';
+export function normalizePaddleEnvironment(
+  rawValue?: string | null
+): PaddleClientEnv | null {
+  const raw = (rawValue || '').trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === 'live' || raw === 'production' || raw === 'prod') {
+    return 'production';
+  }
+  if (raw === 'sandbox' || raw === 'test' || raw === 'testing') {
+    return 'sandbox';
+  }
+  return null;
 }
 
 export function getPaddleClientToken(): string {
   return (import.meta.env.VITE_PADDLE_CLIENT_TOKEN || '').trim();
+}
+
+export function getPaddleEnvironment(): PaddleClientEnv {
+  const explicit = normalizePaddleEnvironment(import.meta.env.VITE_PADDLE_ENV);
+  if (explicit) {
+    return explicit;
+  }
+
+  // Only infer when VITE_PADDLE_ENV is unset; never override an explicit configuration
+  if (getPaddleClientToken().startsWith('live_')) {
+    return 'production';
+  }
+
+  return 'sandbox';
 }
 
 export function getPaddlePriceId(): string {
@@ -148,9 +171,18 @@ export async function ensurePaddleInitialized(): Promise<{ ok: boolean; error?: 
   }
 
   if (env === 'sandbox' && clientToken.startsWith('live_')) {
-    console.warn('[Paddle] Sandbox environment configured with a live_ client token.');
-  } else if (env === 'production' && clientToken.startsWith('test_')) {
-    console.warn('[Paddle] Production environment configured with a test_ client token.');
+    return {
+      ok: false,
+      error:
+        'Paddle configuration mismatch: Sandbox environment cannot be initialized with a live client token.',
+    };
+  }
+  if (env === 'production' && clientToken.startsWith('test_')) {
+    return {
+      ok: false,
+      error:
+        'Paddle configuration mismatch: Live environment cannot be initialized with a sandbox test client token.',
+    };
   }
 
   try {

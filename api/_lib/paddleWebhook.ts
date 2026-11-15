@@ -3,6 +3,7 @@ import {
   getPaddleEnvironment,
   getPaddlePriceId,
   getPaddleWebhookSecret,
+  normalizePaddleEnvironment,
   PaddleEnvironment,
 } from './paddleConfig.js';
 import {
@@ -122,11 +123,12 @@ export function detectPayloadEnvironmentMismatch(
   configuredEnv: PaddleEnvironment
 ): string | null {
   const data = event?.data || {};
-  const customEnv = String(data?.custom_data?.paddleEnv || data?.custom_data?.paddle_env || '')
+  const rawCustomEnv = String(data?.custom_data?.paddleEnv || data?.custom_data?.paddle_env || '')
     .toLowerCase()
     .trim();
-  if (customEnv && (customEnv === 'sandbox' || customEnv === 'production') && customEnv !== configuredEnv) {
-    return `Payload custom_data paddleEnv (${customEnv}) does not match configured environment (${configuredEnv})`;
+  const customEnv = normalizePaddleEnvironment(rawCustomEnv);
+  if (customEnv && customEnv !== configuredEnv) {
+    return `Payload custom_data paddleEnv (${rawCustomEnv}) does not match configured environment (${configuredEnv})`;
   }
 
   const checkoutUrl = String(data?.checkout?.url || '').toLowerCase();

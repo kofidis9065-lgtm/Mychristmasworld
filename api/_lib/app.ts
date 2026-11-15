@@ -12,6 +12,7 @@ import {
   getPaddleApiKey,
   getPaddleEnvironment,
   getPaddlePriceId,
+  normalizePaddleEnvironment,
 } from './paddleConfig.js';
 import {
   checkUserProInSupabase,
@@ -317,7 +318,12 @@ export function createApiApp() {
         });
       }
 
-      const txCustomEnv = String(tx?.custom_data?.paddleEnv || '').toLowerCase().trim();
+      const rawTxCustomEnv = String(
+        tx?.custom_data?.paddleEnv || tx?.custom_data?.paddle_env || ''
+      )
+        .toLowerCase()
+        .trim();
+      const txCustomEnv = normalizePaddleEnvironment(rawTxCustomEnv);
       if (txCustomEnv && txCustomEnv !== configuredEnv) {
         return res.status(403).json({
           success: false,

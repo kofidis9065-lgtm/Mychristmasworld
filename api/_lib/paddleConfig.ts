@@ -1,10 +1,34 @@
 export type PaddleEnvironment = 'sandbox' | 'production';
 
+export function normalizePaddleEnvironment(
+  rawValue?: string | null
+): PaddleEnvironment | null {
+  const raw = (rawValue || '').trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === 'live' || raw === 'production' || raw === 'prod') {
+    return 'production';
+  }
+  if (raw === 'sandbox' || raw === 'test' || raw === 'testing') {
+    return 'sandbox';
+  }
+  return null;
+}
+
 export function getPaddleEnvironment(): PaddleEnvironment {
-  const raw = (process.env.PADDLE_ENV || process.env.VITE_PADDLE_ENV || 'sandbox')
-    .trim()
-    .toLowerCase();
-  return raw === 'production' ? 'production' : 'sandbox';
+  const explicit =
+    normalizePaddleEnvironment(process.env.PADDLE_ENV) ||
+    normalizePaddleEnvironment(process.env.VITE_PADDLE_ENV);
+  if (explicit) {
+    return explicit;
+  }
+
+  const apiKey = getPaddleApiKey();
+  const clientToken = (process.env.VITE_PADDLE_CLIENT_TOKEN || '').trim();
+  if (apiKey.startsWith('pdl_live_') || clientToken.startsWith('live_')) {
+    return 'production';
+  }
+
+  return 'sandbox';
 }
 
 export function getPaddlePriceId(): string {
