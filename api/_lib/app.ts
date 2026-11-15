@@ -6,12 +6,29 @@ import {
   readJsonFile,
   writeJsonFile,
   clearDataDir,
-  grantProAccess,
-  checkProAccess,
 } from './storage.js';
-import { processPaddleWebhook } from './paddleWebhook.js';
+import { extractTransactionItemDetails, processPaddleWebhook } from './paddleWebhook.js';
+import { verifyGoogleIdToken } from './googleAuth.js';
+import {
+  clearSessionCookie,
+  getAuthenticatedSession,
+  setSessionCookie,
+} from './session.js';
+import {
+  getPaddleApiBaseUrl,
+  getPaddleApiKey,
+  getPaddleEnvironment,
+  getPaddlePriceId,
+} from './paddleConfig.js';
+import {
+  checkUserProInSupabase,
+  getVerifiedUserFromSupabase,
+  isSupabaseAdminConfigured,
+  recordVerifiedPaddlePurchase,
+  upsertVerifiedGoogleUserInSupabase,
+} from './supabaseAdmin.js';
 
-// Helper to hash password
+// Helper to hash password for optional local-only guest/dev email accounts
 function serverHash(text: string): string {
   let hash = 0;
   for (let i = 0; i < text.length; i++) {
@@ -37,13 +54,13 @@ export function createApiApp() {
   app.post(
     '/api/paddle/webhook',
     express.raw({ type: '*/*', limit: '2mb' }),
-    (req: Request, res: Response) => {
+    async (req: Request, res: Response) => {
       try {
         const rawBody = Buffer.isBuffer(req.body)
           ? req.body
           : Buffer.from(typeof req.body === 'string' ? req.body : '', 'utf8');
         const signatureHeader = req.headers['paddle-signature'];
-        const result = processPaddleWebhook(rawBody, signatureHeader);
+        const result = await processPaddleWebhook(rawBody, signatureHeader);
         return res.status(result.status).json(result.body);
       } catch (err: any) {
         console.error('[Paddle Webhook Error]', err);
@@ -55,66 +72,288 @@ export function createApiApp() {
   // Standard JSON parser for all remaining API routes
   app.use(express.json({ limit: '10mb' }));
 
-  // Clear server-side cache and persistent data
+  // Clear local non-database cache only
   app.all('/api/clear-cache', (_req: Request, res: Response) => {
     try {
       clearDataDir();
-      return res.json({ success: true, message: 'Server cache and data cleared successfully.' });
+      return res.json({ success: true, message: 'Server cache cleared successfully.' });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });
     }
   });
 
-  // Check user Christmas Pro Plan status
-  app.get('/api/user/pro-status/:userId', (req: Request, res: Response) => {
-    const { userId } = req.params;
-    const email = (req.query.email as string || '').toLowerCase().trim();
-    const isPro = checkProAccess(userId, email);
-    return res.json({ success: true, isPro });
-  });
+  // Auth 0: Verify Google ID token server-side, upsert user in Supabase, set HttpOnly session cookie
+  app.post('/api/auth/google-sync', async (req: Request, res: Response) => {
+    try {
+      const credential = String(req.body?.credential || '').trim();
+      if (!credential) {
+        return res.status(400).json({
+          success: false,
+          error: 'Verified Google ID token credential is required.',
+        });
+      }
 
-  // Grant Pro status to user
-  app.post('/api/user/grant-pro', (req: Request, res: Response) => {
-    const { userId, email } = req.body;
-    if (!userId && !email) {
-      return res.status(400).json({ success: false, error: 'UserId or email required' });
+      if (!isSupabaseAdminConfigured()) {
+        return res.status(503).json({
+          success: false,
+          error: 'Authentication database is not configured on the server.',
+        });
+      }
+
+      const verifiedIdentity = await verifyGoogleIdToken(credential);
+      const user = await upsertVerifiedGoogleUserInSupabase({
+        userId: verifiedIdentity.userId,
+        googleSub: verifiedIdentity.googleSub,
+        email: verifiedIdentity.email,
+        emailVerified: verifiedIdentity.emailVerified,
+        nickname: verifiedIdentity.nickname,
+        avatarUrl: verifiedIdentity.avatarUrl,
+      });
+
+      setSessionCookie(req, res, {
+        uid: user.id,
+        sub: verifiedIdentity.googleSub,
+        email: user.email,
+        provider: 'google',
+      });
+
+      return res.json({
+        success: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          nickname: user.nickname,
+          avatar: user.avatar,
+          provider: 'google',
+          isPro: user.isPro,
+          createdAt: user.createdAt,
+        },
+      });
+    } catch (err: any) {
+      console.warn('[Google Auth Error]', err?.message || err);
+      return res.status(401).json({
+        success: false,
+        error: err?.message || 'Google ID token verification failed.',
+      });
     }
-
-    grantProAccess(userId, email);
-    return res.json({ success: true, message: 'Christmas Pro Plan granted successfully' });
   });
 
-  // Auth 0: Google Sign-In Sync
-  app.post('/api/auth/google-sync', (req: Request, res: Response) => {
-    const { id, email, nickname, avatar } = req.body;
-    if (!email || !id) {
-      return res.status(400).json({ success: false, error: 'User ID and Email required' });
+  // Auth Session Restore: Reads HttpOnly mcw_session cookie and returns authoritative user + Pro status
+  app.get('/api/auth/session', async (req: Request, res: Response) => {
+    try {
+      const session = getAuthenticatedSession(req);
+      if (!session || session.provider !== 'google') {
+        return res.json({ success: true, authenticated: false, user: null, isPro: false });
+      }
+
+      if (!isSupabaseAdminConfigured()) {
+        return res.json({ success: true, authenticated: false, user: null, isPro: false });
+      }
+
+      const user = await getVerifiedUserFromSupabase(session.uid);
+      if (!user) {
+        clearSessionCookie(req, res);
+        return res.json({ success: true, authenticated: false, user: null, isPro: false });
+      }
+
+      return res.json({
+        success: true,
+        authenticated: true,
+        isPro: user.isPro,
+        environment: getPaddleEnvironment(),
+        user: {
+          id: user.id,
+          email: user.email,
+          nickname: user.nickname,
+          avatar: user.avatar,
+          provider: user.provider,
+          isPro: user.isPro,
+          createdAt: user.createdAt,
+        },
+      });
+    } catch (err: any) {
+      console.error('[Session Check Error]', err);
+      return res.status(500).json({ success: false, authenticated: false, isPro: false });
     }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanNick = (nickname || cleanEmail.split('@')[0]).trim();
-    const users = readJsonFile<Record<string, any>>(USERS_FILE, {});
-
-    const existingIsPro = Boolean(users[cleanEmail]?.isPro || checkProAccess(id, cleanEmail));
-    const googleUser = {
-      id,
-      email: cleanEmail,
-      nickname: cleanNick,
-      avatar:
-        avatar ||
-        `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanNick)}&backgroundColor=0d1723`,
-      provider: 'google',
-      isPro: existingIsPro,
-      updatedAt: new Date().toISOString(),
-    };
-
-    users[cleanEmail] = googleUser;
-    writeJsonFile(USERS_FILE, users);
-
-    return res.json({ success: true, user: googleUser });
   });
 
-  // Auth 1: Register Account
+  // Auth Logout: Clears HttpOnly session cookie
+  app.post('/api/auth/logout', (req: Request, res: Response) => {
+    clearSessionCookie(req, res);
+    return res.json({ success: true });
+  });
+
+  // Authoritative Pro Status Check (requires verified HttpOnly session cookie)
+  app.get('/api/user/pro-status', async (req: Request, res: Response) => {
+    try {
+      const session = getAuthenticatedSession(req);
+      if (!session || session.provider !== 'google' || !isSupabaseAdminConfigured()) {
+        return res.json({ success: true, authenticated: false, isPro: false });
+      }
+
+      const env = getPaddleEnvironment();
+      const isPro = await checkUserProInSupabase(session.uid, env);
+      return res.json({
+        success: true,
+        authenticated: true,
+        isPro,
+        environment: env,
+      });
+    } catch (err: any) {
+      console.error('[Pro Status Error]', err);
+      return res.status(500).json({ success: false, isPro: false, error: err?.message });
+    }
+  });
+
+  // Backward-compatible route enforcing that requested :userId matches verified session cookie
+  app.get('/api/user/pro-status/:userId', async (req: Request, res: Response) => {
+    try {
+      const session = getAuthenticatedSession(req);
+      const { userId } = req.params;
+      if (
+        !session ||
+        session.provider !== 'google' ||
+        session.uid !== userId ||
+        !isSupabaseAdminConfigured()
+      ) {
+        return res.json({ success: true, authenticated: false, isPro: false });
+      }
+
+      const env = getPaddleEnvironment();
+      const isPro = await checkUserProInSupabase(session.uid, env);
+      return res.json({
+        success: true,
+        authenticated: true,
+        isPro,
+        environment: env,
+      });
+    } catch (err: any) {
+      console.error('[Pro Status Param Error]', err);
+      return res.status(500).json({ success: false, isPro: false, error: err?.message });
+    }
+  });
+
+  // DISABLED: Unauthenticated client-side Pro grants are permanently blocked
+  app.post('/api/user/grant-pro', (_req: Request, res: Response) => {
+    return res.status(403).json({
+      success: false,
+      error:
+        'Direct Pro activation is disabled. Christmas Pro is granted exclusively after verified Paddle payment.',
+    });
+  });
+
+  // Optional fast post-checkout confirmation for verified Google users
+  app.post('/api/paddle/confirm-transaction', async (req: Request, res: Response) => {
+    try {
+      const session = getAuthenticatedSession(req);
+      if (!session || session.provider !== 'google') {
+        return res.status(401).json({
+          success: false,
+          error: 'Verified Google Sign-In session is required.',
+        });
+      }
+
+      if (!isSupabaseAdminConfigured()) {
+        return res.status(503).json({
+          success: false,
+          error: 'Database is not configured on the server.',
+        });
+      }
+
+      const configuredEnv = getPaddleEnvironment();
+      // 1. Check if webhook has already recorded this user's active purchase
+      const alreadyPro = await checkUserProInSupabase(session.uid, configuredEnv);
+      if (alreadyPro) {
+        return res.json({ success: true, isPro: true, source: 'database' });
+      }
+
+      const transactionId = String(req.body?.transactionId || '').trim();
+      const apiKey = getPaddleApiKey();
+      const configuredPriceId = getPaddlePriceId();
+
+      if (!transactionId || !apiKey || !configuredPriceId) {
+        return res.json({ success: true, isPro: false, pendingWebhook: true });
+      }
+
+      // 2. Verify transaction directly with Paddle Billing API
+      const paddleRes = await fetch(
+        `${getPaddleApiBaseUrl(configuredEnv)}/transactions/${encodeURIComponent(transactionId)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (!paddleRes.ok) {
+        return res.json({ success: true, isPro: false, pendingWebhook: true });
+      }
+
+      const paddleJson = (await paddleRes.json()) as { data?: any };
+      const tx = paddleJson?.data;
+      if (!tx) {
+        return res.json({ success: true, isPro: false, pendingWebhook: true });
+      }
+
+      const txStatus = String(tx.status || '').toLowerCase().trim();
+      if (txStatus !== 'completed' && txStatus !== 'paid') {
+        return res.json({ success: true, isPro: false, pendingWebhook: true, status: txStatus });
+      }
+
+      const { priceIds, productIds } = extractTransactionItemDetails(tx);
+      if (!priceIds.includes(configuredPriceId)) {
+        return res.status(400).json({
+          success: false,
+          isPro: false,
+          error: 'Transaction Price ID does not match Christmas Pro.',
+        });
+      }
+
+      const txUserId = String(tx?.custom_data?.userId || tx?.custom_data?.user_id || '').trim();
+      if (txUserId !== session.uid) {
+        return res.status(403).json({
+          success: false,
+          isPro: false,
+          error: 'Transaction does not belong to the signed-in Google account.',
+        });
+      }
+
+      const txCustomEnv = String(tx?.custom_data?.paddleEnv || '').toLowerCase().trim();
+      if (txCustomEnv && txCustomEnv !== configuredEnv) {
+        return res.status(403).json({
+          success: false,
+          isPro: false,
+          error: 'Transaction environment mismatch.',
+        });
+      }
+
+      const totals = tx?.details?.totals || {};
+      await recordVerifiedPaddlePurchase({
+        transactionId: String(tx.id),
+        userId: session.uid,
+        googleSub: session.sub || null,
+        email: session.email,
+        customerId: String(tx?.customer_id || '').trim() || null,
+        priceId: configuredPriceId,
+        productId: productIds[0] || null,
+        environment: configuredEnv,
+        amount: totals?.total !== undefined ? String(totals.total) : null,
+        currencyCode: String(tx?.currency_code || totals?.currency_code || '').trim() || null,
+        purchasedAt: String(tx?.billed_at || tx?.created_at || new Date().toISOString()),
+        rawCustomData: tx?.custom_data || {},
+        rawPayload: tx,
+      });
+
+      const confirmedPro = await checkUserProInSupabase(session.uid, configuredEnv);
+      return res.json({ success: true, isPro: confirmedPro, source: 'paddle_api' });
+    } catch (err: any) {
+      console.error('[Confirm Transaction Error]', err);
+      return res.status(500).json({ success: false, isPro: false, error: err?.message });
+    }
+  });
+
+  // Auth 1: Register Local Email Account (does not grant Pro)
   app.post('/api/auth/register', (req: Request, res: Response) => {
     const { email, nickname, password } = req.body;
     if (!email || !password) {
@@ -140,6 +379,8 @@ export function createApiApp() {
       nickname: cleanNick,
       passwordHash: serverHash(password),
       avatar,
+      provider: 'local',
+      isPro: false,
       createdAt: new Date().toISOString(),
     };
 
@@ -150,7 +391,7 @@ export function createApiApp() {
     return res.json({ success: true, user: userSafe });
   });
 
-  // Auth 2: Login Account
+  // Auth 2: Login Local Email Account
   app.post('/api/auth/login', (req: Request, res: Response) => {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -166,7 +407,7 @@ export function createApiApp() {
     }
 
     const { passwordHash: _, ...userSafe } = user;
-    return res.json({ success: true, user: userSafe });
+    return res.json({ success: true, user: { ...userSafe, isPro: false } });
   });
 
   // 1. Get user world by User ID
@@ -180,7 +421,7 @@ export function createApiApp() {
     return res.json({ success: true, world: null });
   });
 
-  // 2. Save user world by Google User ID
+  // 2. Save user world by User ID
   app.post('/api/worlds/:userId', (req: Request, res: Response) => {
     const { userId } = req.params;
     const worldData = req.body;

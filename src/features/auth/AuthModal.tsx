@@ -143,9 +143,9 @@ export const AuthModal: React.FC<Props> = ({
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     soundEngine.playClick();
-    logoutUser();
+    await logoutUser();
     onUserChanged(null);
     onClose();
   };

@@ -17,7 +17,7 @@ import { soundEngine } from './lib/audioSynthesis';
 import { youtubeAudio } from './lib/youtubePlayerService';
 import { usePWAInstall } from './lib/usePWAInstall';
 import { User } from '@supabase/supabase-js';
-import { AppUser, getStoredUser, checkProStatus } from './features/auth/userAuthService';
+import { AppUser, getStoredUser, checkProStatus, fetchServerAuthSession } from './features/auth/userAuthService';
 
 export function App() {
   const [world, setWorld] = useState<World>(() => createDefaultWorld('village'));
@@ -88,24 +88,49 @@ export function App() {
         }
       }
 
-      const storedAppUser = getStoredUser();
+      // Restore verified Google session & authoritative Pro entitlement from server HttpOnly cookie
+      const serverSession = await fetchServerAuthSession();
+      const activeAppUser = serverSession.authenticated && serverSession.user
+        ? serverSession.user
+        : getStoredUser();
 
-      // Check Pro status from server & session
-      const proActive = await checkProStatus(storedAppUser?.id || currentUser?.id || 'guest', storedAppUser?.email || currentUser?.email);
+      if (serverSession.authenticated && serverSession.user) {
+        setCurrentUser(serverSession.user);
+      } else if (!activeAppUser) {
+        setCurrentUser(null);
+      }
+
+      // Server is authoritative for Pro status (never trust localStorage)
+      let proActive = false;
+      if (activeAppUser?.provider === 'google') {
+        proActive = serverSession.authenticated ? serverSession.isPro : await checkProStatus();
+      }
       setIsProUser(proActive);
 
+      // Handle Paddle Checkout redirect return (?pro_success=true)
+      if (typeof window !== 'undefined' && window.location.search.includes('pro_success=true')) {
+        const refreshedPro = await checkProStatus();
+        if (refreshedPro) {
+          setIsProUser(true);
+          proActive = true;
+        }
+        const url = new URL(window.location.href);
+        url.searchParams.delete('pro_success');
+        window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+      }
+
       // Check if world exists in cloud or local cache
-      const saved = await loadWorld(currentUser, storedAppUser);
+      const saved = await loadWorld(currentUser, activeAppUser);
       if (saved) {
         setWorld(saved);
         setHasExistingSavedWorld(true);
-        if (storedAppUser) {
+        if (activeAppUser) {
           setSaveMode('cloud');
         }
       }
 
       // Check daily gift status
-      const claimed = await checkDailyGiftClaimed(currentUser, 0, storedAppUser?.id, proActive);
+      const claimed = await checkDailyGiftClaimed(currentUser, 0, activeAppUser?.id, proActive);
       setDailyGiftAvailable(!claimed);
     };
 
@@ -115,9 +140,7 @@ export function App() {
   // Update daily gift check and Pro status when user changes
   useEffect(() => {
     const syncUserStatus = async () => {
-      const activeId = currentUser?.id || user?.id || 'guest';
-      const activeEmail = currentUser?.email || user?.email;
-      const proActive = await checkProStatus(activeId, activeEmail);
+      const proActive = currentUser?.provider === 'google' ? await checkProStatus() : false;
       setIsProUser(proActive);
 
       const claimed = await checkDailyGiftClaimed(user, 0, currentUser?.id, proActive);
@@ -624,6 +647,12 @@ export function App() {
         onUserChanged={async (newUser) => {
           setCurrentUser(newUser);
           if (newUser) {
+            if (newUser.provider === 'google') {
+              const verifiedPro = newUser.isPro !== undefined ? Boolean(newUser.isPro) : await checkProStatus();
+              setIsProUser(verifiedPro);
+            } else {
+              setIsProUser(false);
+            }
             const cloudWorld = await loadWorld(user, newUser);
             if (cloudWorld) {
               setWorld(cloudWorld);
@@ -632,6 +661,7 @@ export function App() {
             }
             setSaveMode('cloud');
           } else {
+            setIsProUser(false);
             setSaveMode('local');
           }
         }}
@@ -646,6 +676,13 @@ export function App() {
         onProUnlocked={() => {
           setIsProUser(true);
           setDailyGiftAvailable(true);
+        }}
+        onProRevoked={() => {
+          setIsProUser(false);
+        }}
+        onRequireGoogleAuth={() => {
+          setIsProModalOpen(false);
+          setIsAuthModalOpen(true);
         }}
       />
 

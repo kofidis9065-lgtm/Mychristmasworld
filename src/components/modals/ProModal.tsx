@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
-import { Sparkles, Check, X, ShieldCheck, Ticket, Star, RefreshCw } from 'lucide-react';
-import { AppUser, grantProToUser, checkProStatus } from '../../features/auth/userAuthService';
+import { Sparkles, Check, X, ShieldCheck, Ticket, Star, RefreshCw, LogIn } from 'lucide-react';
+import {
+  AppUser,
+  checkProStatus,
+  confirmPaddleTransaction,
+  fetchServerAuthSession,
+} from '../../features/auth/userAuthService';
 import { openPaddleCheckout } from '../../lib/paddleService';
 import { soundEngine } from '../../lib/audioSynthesis';
 
@@ -11,6 +16,8 @@ interface Props {
   currentUser?: AppUser | null;
   onProGranted?: () => void;
   onProUnlocked?: () => void;
+  onProRevoked?: () => void;
+  onRequireGoogleAuth?: () => void;
 }
 
 export const ProModal: React.FC<Props> = ({
@@ -20,9 +27,15 @@ export const ProModal: React.FC<Props> = ({
   currentUser,
   onProGranted,
   onProUnlocked,
+  onProRevoked,
+  onRequireGoogleAuth,
 }) => {
   const activeUser = currentUser || user || null;
+  const isGoogleSignedIn = Boolean(
+    activeUser && activeUser.provider === 'google' && activeUser.id.startsWith('google_') && activeUser.email
+  );
   const [loading, setLoading] = useState(false);
+  const [verifyingPayment, setVerifyingPayment] = useState(false);
   const [msg, setMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   if (!isOpen) return null;
@@ -32,54 +45,129 @@ export const ProModal: React.FC<Props> = ({
     if (onProUnlocked) onProUnlocked();
   };
 
-  const handlePurchaseClick = () => {
+  const pollForServerConfirmation = async (transactionId?: string) => {
+    setVerifyingPayment(true);
+    setMsg({
+      type: 'info',
+      text: 'Payment received! Confirming your verified Christmas Pro purchase with the server...',
+    });
+
+    const firstAttempt = await confirmPaddleTransaction(transactionId);
+    if (firstAttempt.isPro) {
+      setVerifyingPayment(false);
+      triggerProSuccess();
+      setMsg({
+        type: 'success',
+        text: '✨ Christmas Pro Plan Activated! Wonderworld, 30 Premium Animated Assets, and all 22 Secret Gifts are now permanently linked to your Google account.',
+      });
+      return;
+    }
+
+    if (firstAttempt.error && !firstAttempt.pendingWebhook) {
+      setVerifyingPayment(false);
+      setMsg({ type: 'error', text: firstAttempt.error });
+      return;
+    }
+
+    // Poll until Paddle webhook writes verified purchase to Supabase (up to ~18s)
+    for (let attempt = 0; attempt < 9; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const confirmed = await checkProStatus();
+      if (confirmed) {
+        setVerifyingPayment(false);
+        triggerProSuccess();
+        setMsg({
+          type: 'success',
+          text: '✨ Christmas Pro Plan Activated! Wonderworld, 30 Premium Animated Assets, and all 22 Secret Gifts are now permanently linked to your Google account.',
+        });
+        return;
+      }
+    }
+
+    setVerifyingPayment(false);
+    setMsg({
+      type: 'info',
+      text: 'Your payment confirmation is still processing. Click "Restore Purchase" in a few seconds to sync your Pro access.',
+    });
+  };
+
+  const handlePurchaseClick = async () => {
     soundEngine.playClick();
     setMsg(null);
 
-    const userId = activeUser?.id || 'guest_' + Math.random().toString(36).substring(2, 8);
-    const email = activeUser?.email || '';
+    if (!isGoogleSignedIn || !activeUser) {
+      setMsg({
+        type: 'info',
+        text: 'Please sign in with Google first so your €1.99 Christmas Pro purchase is permanently linked to your account across devices.',
+      });
+      if (onRequireGoogleAuth) {
+        onRequireGoogleAuth();
+      }
+      return;
+    }
 
-    // Attempt official Paddle Checkout
+    setLoading(true);
+    const session = await fetchServerAuthSession();
+    setLoading(false);
+
+    if (!session.authenticated || !session.user || session.user.provider !== 'google') {
+      setMsg({
+        type: 'info',
+        text: 'Please sign in with Google again to verify your session before checkout.',
+      });
+      if (onRequireGoogleAuth) {
+        onRequireGoogleAuth();
+      }
+      return;
+    }
+
+    if (session.isPro) {
+      triggerProSuccess();
+      setMsg({
+        type: 'success',
+        text: 'Your Google account already owns Christmas Pro! Access restored.',
+      });
+      return;
+    }
+
     openPaddleCheckout({
-      userId,
-      email,
-      onSuccess: async () => {
-        await grantProToUser(userId, email);
-        triggerProSuccess();
-        setMsg({ type: 'success', text: 'Christmas Pro Plan unlocked! Enjoy Wonderworld & all 30 premium assets.' });
+      userId: session.user.id,
+      email: session.user.email,
+      onSuccess: (transactionId) => {
+        pollForServerConfirmation(transactionId);
       },
       onError: (err) => {
         setMsg({ type: 'error', text: err });
       },
     });
-
-    // Provide instant activation feedback for Sandbox testing phase
-    setTimeout(async () => {
-      await grantProToUser(userId, email);
-      triggerProSuccess();
-      setMsg({
-        type: 'success',
-        text: '✨ Christmas Pro Plan Activated! Wonderworld, 30 Premium Animated Assets, and all 22 Secret Gifts are now permanently unlocked on your account.',
-      });
-    }, 1200);
   };
 
   const handleRestorePurchase = async () => {
     soundEngine.playClick();
-    if (!activeUser) {
-      setMsg({ type: 'info', text: 'Please sign in to restore your Christmas Pro purchase across devices.' });
+    if (!isGoogleSignedIn) {
+      setMsg({
+        type: 'info',
+        text: 'Please sign in with Google to restore your Christmas Pro purchase across devices.',
+      });
+      if (onRequireGoogleAuth) {
+        onRequireGoogleAuth();
+      }
       return;
     }
 
     setLoading(true);
-    const isPro = await checkProStatus(activeUser.id, activeUser.email);
+    const isPro = await checkProStatus();
     setLoading(false);
 
     if (isPro) {
       triggerProSuccess();
       setMsg({ type: 'success', text: 'Christmas Pro Plan restored successfully!' });
     } else {
-      setMsg({ type: 'info', text: 'No active purchase found for this account. Click "Unlock for €1.99" to upgrade.' });
+      if (onProRevoked) onProRevoked();
+      setMsg({
+        type: 'info',
+        text: 'No active purchase found for this Google account. Click "Unlock Christmas Pro for €1.99" to upgrade.',
+      });
     }
   };
 
@@ -121,7 +209,7 @@ export const ProModal: React.FC<Props> = ({
         </div>
 
         {/* Feature List */}
-        <div className="space-y-3 mb-6 bg-black/30 p-4 rounded-xl border border-white/10 text-xs sm:text-sm">
+        <div className="space-y-3 mb-5 bg-black/30 p-4 rounded-xl border border-white/10 text-xs sm:text-sm">
           <div className="flex items-start gap-2.5">
             <Check className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
             <div>
@@ -153,6 +241,12 @@ export const ProModal: React.FC<Props> = ({
           </div>
         </div>
 
+        {!isGoogleSignedIn && (
+          <div className="mb-4 p-3 rounded-xl bg-amber-950/60 border border-amber-400/40 text-amber-100 text-xs leading-relaxed">
+            <strong>Google Sign-In required:</strong> Sign in with Google first so your Christmas Pro purchase is securely verified and permanently restored on all your devices.
+          </div>
+        )}
+
         {msg && (
           <div
             className={`mb-4 p-3 rounded-xl text-xs flex items-center gap-2 ${
@@ -167,23 +261,40 @@ export const ProModal: React.FC<Props> = ({
           </div>
         )}
 
-        {/* Purchase Action Button */}
-        <button
-          onClick={handlePurchaseClick}
-          className="w-full py-3.5 px-4 rounded-xl festive-gradient font-black text-sm uppercase tracking-wider shadow-2xl hover:brightness-110 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 mb-3"
-        >
-          <Sparkles className="w-5 h-5 text-amber-200 animate-spin" />
-          <span>Unlock Christmas Pro for €1.99</span>
-        </button>
+        {/* Purchase or Google Sign-In Action Button */}
+        {isGoogleSignedIn ? (
+          <button
+            onClick={handlePurchaseClick}
+            disabled={loading || verifyingPayment}
+            className="w-full py-3.5 px-4 rounded-xl festive-gradient font-black text-sm uppercase tracking-wider shadow-2xl hover:brightness-110 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 mb-3 disabled:opacity-60"
+          >
+            <Sparkles className={`w-5 h-5 text-amber-200 ${verifyingPayment ? 'animate-spin' : ''}`} />
+            <span>
+              {verifyingPayment
+                ? 'Confirming Payment...'
+                : loading
+                ? 'Checking Session...'
+                : 'Unlock Christmas Pro for €1.99'}
+            </span>
+          </button>
+        ) : (
+          <button
+            onClick={handlePurchaseClick}
+            className="w-full py-3.5 px-4 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-black text-sm tracking-wide shadow-2xl active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 mb-3"
+          >
+            <LogIn className="w-5 h-5 text-amber-600" />
+            <span>Sign in with Google to Unlock (€1.99)</span>
+          </button>
+        )}
 
         {/* Secondary Restore & Legal Footer */}
         <div className="flex items-center justify-between pt-3 border-t border-white/10 text-[11px] text-[#91a1b1]">
           <button
             onClick={handleRestorePurchase}
-            disabled={loading}
-            className="flex items-center gap-1 hover:text-amber-300 transition-colors cursor-pointer"
+            disabled={loading || verifyingPayment}
+            className="flex items-center gap-1 hover:text-amber-300 transition-colors cursor-pointer disabled:opacity-50"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${loading || verifyingPayment ? 'animate-spin' : ''}`} />
             <span>Restore Purchase</span>
           </button>
 

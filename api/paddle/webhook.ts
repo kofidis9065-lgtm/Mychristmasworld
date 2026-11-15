@@ -47,7 +47,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   try {
     const rawBody = await readRawBody(req);
     const signatureHeader = req.headers['paddle-signature'];
-    const result = processPaddleWebhook(rawBody, signatureHeader);
+    const result = await processPaddleWebhook(rawBody, signatureHeader);
     sendJson(res, result.status, result.body);
   } catch (err: any) {
     console.error('[Vercel Paddle Webhook Error]', err);

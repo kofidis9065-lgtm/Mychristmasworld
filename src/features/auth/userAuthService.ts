@@ -1,4 +1,4 @@
-// Local User Authentication & Persistent Cloud Storage Service
+// User Authentication & Server-Authoritative Entitlement Service
 
 export interface AppUser {
   id: string;
@@ -8,62 +8,6 @@ export interface AppUser {
   createdAt: string;
   provider?: 'local' | 'google';
   isPro?: boolean;
-}
-
-export function parseJwt(token: string): any {
-  try {
-    const base64Url = token.split('.')[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    const jsonPayload = decodeURIComponent(
-      atob(base64)
-        .split('')
-        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-        .join('')
-    );
-    return JSON.parse(jsonPayload);
-  } catch {
-    return null;
-  }
-}
-
-export async function loginWithGoogleCredential(
-  credentialToken: string
-): Promise<{ success: boolean; user?: AppUser; error?: string }> {
-  const payload = parseJwt(credentialToken);
-  if (!payload || !payload.email || !payload.sub) {
-    return { success: false, error: 'Could not decode Google Sign-In response token.' };
-  }
-
-  const cleanEmail = payload.email.trim().toLowerCase();
-  const cleanNick = payload.name || payload.given_name || cleanEmail.split('@')[0];
-  const avatar =
-    payload.picture ||
-    `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanNick)}&backgroundColor=0d1723`;
-  const userId = 'google_' + payload.sub;
-
-  const appUser: AppUser = {
-    id: userId,
-    email: cleanEmail,
-    nickname: cleanNick,
-    avatar,
-    createdAt: new Date().toISOString(),
-    provider: 'google',
-  };
-
-  setStoredUser(appUser);
-
-  // Sync to server backend
-  try {
-    await fetch('/api/auth/google-sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(appUser),
-    });
-  } catch (err) {
-    console.warn('Google backend sync warning:', err);
-  }
-
-  return { success: true, user: appUser };
 }
 
 const CURRENT_USER_SESSION_KEY = 'mcw_current_user_v2';
@@ -78,7 +22,82 @@ interface StoredAccount {
   createdAt: string;
 }
 
-// Simple deterministic hash for password checking
+function sanitizeStoredUser(user: AppUser | null): AppUser | null {
+  if (!user) return null;
+  // Never store or trust isPro inside localStorage as proof of purchase
+  const { isPro: _ignored, ...safeProfile } = user;
+  return safeProfile;
+}
+
+export async function loginWithGoogleCredential(
+  credentialToken: string
+): Promise<{ success: boolean; user?: AppUser; error?: string }> {
+  if (!credentialToken) {
+    return { success: false, error: 'Missing Google credential token.' };
+  }
+
+  try {
+    const res = await fetch('/api/auth/google-sync', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: credentialToken }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.success || !data?.user) {
+      return {
+        success: false,
+        error: data?.error || 'Could not verify Google Sign-In on the server.',
+      };
+    }
+
+    const verifiedUser: AppUser = data.user;
+    setStoredUser(verifiedUser);
+    return { success: true, user: verifiedUser };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Network error while verifying Google Sign-In.',
+    };
+  }
+}
+
+export async function fetchServerAuthSession(): Promise<{
+  authenticated: boolean;
+  user: AppUser | null;
+  isPro: boolean;
+}> {
+  try {
+    const res = await fetch('/api/auth/session', {
+      method: 'GET',
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      return { authenticated: false, user: null, isPro: false };
+    }
+    const data = await res.json();
+    if (data?.authenticated && data?.user) {
+      setStoredUser(data.user);
+      return {
+        authenticated: true,
+        user: data.user,
+        isPro: Boolean(data.isPro ?? data.user.isPro),
+      };
+    }
+
+    // Clear stale Google profile cache if HttpOnly server session is no longer active
+    const cached = getStoredUser();
+    if (cached?.provider === 'google') {
+      setStoredUser(null);
+    }
+    return { authenticated: false, user: null, isPro: false };
+  } catch {
+    return { authenticated: false, user: null, isPro: false };
+  }
+}
+
+// Simple deterministic hash for local non-Google password checking
 function simpleHash(text: string): string {
   let hash = 0;
   for (let i = 0; i < text.length; i++) {
@@ -109,11 +128,9 @@ export function getStoredUser(): AppUser | null {
   try {
     const raw = localStorage.getItem(CURRENT_USER_SESSION_KEY);
     if (raw) {
-      if (raw.toLowerCase().includes('kofidis')) {
-        localStorage.removeItem(CURRENT_USER_SESSION_KEY);
-        return null;
-      }
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw) as AppUser;
+      // Server is authoritative for Pro status; never read isPro from localStorage
+      return sanitizeStoredUser(parsed);
     }
   } catch (err) {
     console.error('Error reading user session:', err);
@@ -123,8 +140,9 @@ export function getStoredUser(): AppUser | null {
 
 export function setStoredUser(user: AppUser | null) {
   try {
-    if (user) {
-      localStorage.setItem(CURRENT_USER_SESSION_KEY, JSON.stringify(user));
+    const safeUser = sanitizeStoredUser(user);
+    if (safeUser) {
+      localStorage.setItem(CURRENT_USER_SESSION_KEY, JSON.stringify(safeUser));
     } else {
       localStorage.removeItem(CURRENT_USER_SESSION_KEY);
     }
@@ -148,10 +166,10 @@ export async function registerUser(
     return { success: false, error: 'Password must be at least 4 characters long.' };
   }
 
-  // 1. Try server backend first
   try {
     const res = await fetch('/api/auth/register', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: cleanEmail, nickname: cleanNick, password }),
     });
@@ -165,10 +183,9 @@ export async function registerUser(
       }
     }
   } catch {
-    // Backend offline / static mode fallback
+    // Backend offline fallback
   }
 
-  // 2. Local fallback
   const accounts = getLocalAccounts();
   const existing = accounts.find((a) => a.email === cleanEmail);
   if (existing) {
@@ -194,6 +211,7 @@ export async function registerUser(
     email: cleanEmail,
     nickname: cleanNick,
     avatar,
+    provider: 'local',
     createdAt: newAccount.createdAt,
   };
 
@@ -214,10 +232,10 @@ export async function loginUser(
     return { success: false, error: 'Please enter your password.' };
   }
 
-  // 1. Try server backend first
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: cleanEmail, password }),
     });
@@ -234,7 +252,6 @@ export async function loginUser(
     // Backend offline fallback
   }
 
-  // 2. Local fallback
   const accounts = getLocalAccounts();
   const account = accounts.find((a) => a.email === cleanEmail);
   if (!account) {
@@ -250,6 +267,7 @@ export async function loginUser(
     email: account.email,
     nickname: account.nickname,
     avatar: account.avatar,
+    provider: 'local',
     createdAt: account.createdAt,
   };
 
@@ -257,11 +275,19 @@ export async function loginUser(
   return { success: true, user: appUser };
 }
 
-export function logoutUser() {
+export async function logoutUser(): Promise<void> {
   setStoredUser(null);
+  try {
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+      keepalive: true,
+    });
+  } catch {
+    // ignore network error on logout
+  }
 }
 
-// Backward compatibility alias for existing code
 export type GoogleUser = AppUser;
 export const getStoredGoogleUser = getStoredUser;
 export const setStoredGoogleUser = setStoredUser;
@@ -273,6 +299,7 @@ export async function saveWorldToCloudBackend(
   try {
     const res = await fetch(`/api/worlds/${userId}`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(world),
     });
@@ -287,7 +314,9 @@ export async function saveWorldToCloudBackend(
 
 export async function loadWorldFromCloudBackend(userId: string): Promise<any | null> {
   try {
-    const res = await fetch(`/api/worlds/${userId}`);
+    const res = await fetch(`/api/worlds/${userId}`, {
+      credentials: 'include',
+    });
     if (res.ok) {
       const data = await res.json();
       if (data.success && data.world) {
@@ -300,52 +329,44 @@ export async function loadWorldFromCloudBackend(userId: string): Promise<any | n
   return null;
 }
 
-export async function checkProStatus(userId: string, email?: string): Promise<boolean> {
-  // Check local cache first
-  const storedUser = getStoredUser();
-  if (storedUser && (storedUser.id === userId || storedUser.email === email) && storedUser.isPro) {
-    return true;
-  }
-
-  // Check server backend
+/**
+ * Always checks the server (Supabase via HttpOnly session cookie) for authoritative Pro status.
+ * Never trusts localStorage as proof of purchase.
+ */
+export async function checkProStatus(): Promise<boolean> {
   try {
-    const res = await fetch(`/api/user/pro-status/${encodeURIComponent(userId)}?email=${encodeURIComponent(email || '')}`);
+    const res = await fetch('/api/user/pro-status', {
+      method: 'GET',
+      credentials: 'include',
+    });
     if (res.ok) {
       const data = await res.json();
-      if (data.isPro) {
-        if (storedUser) {
-          const updated = { ...storedUser, isPro: true };
-          setStoredUser(updated);
-        }
-        return true;
-      }
+      return Boolean(data?.isPro);
     }
   } catch (err) {
     console.warn('Pro status check error:', err);
   }
 
-  return storedUser?.isPro || false;
+  return false;
 }
 
-export async function grantProToUser(userId: string, email?: string): Promise<boolean> {
-  const storedUser = getStoredUser();
-  if (storedUser) {
-    const updated = { ...storedUser, isPro: true };
-    setStoredUser(updated);
-  }
-
+export async function confirmPaddleTransaction(
+  transactionId?: string
+): Promise<{ isPro: boolean; pendingWebhook?: boolean; error?: string }> {
   try {
-    const res = await fetch('/api/user/grant-pro', {
+    const res = await fetch('/api/paddle/confirm-transaction', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, email }),
+      body: JSON.stringify({ transactionId }),
     });
-    if (res.ok) {
-      return true;
-    }
-  } catch (err) {
-    console.warn('Grant pro error:', err);
+    const data = await res.json().catch(() => ({}));
+    return {
+      isPro: Boolean(data?.isPro),
+      pendingWebhook: Boolean(data?.pendingWebhook),
+      error: data?.error,
+    };
+  } catch (err: any) {
+    return { isPro: false, pendingWebhook: true, error: err?.message };
   }
-
-  return true;
 }
