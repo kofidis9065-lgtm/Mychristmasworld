@@ -1,11 +1,5 @@
 import express, { Request, Response } from 'express';
-import {
-  WORLDS_FILE,
-  REWARDS_FILE,
-  readJsonFile,
-  writeJsonFile,
-  clearDataDir,
-} from './storage.js';
+import { clearDataDir } from './storage.js';
 import { extractTransactionItemDetails, processPaddleWebhook } from './paddleWebhook.js';
 import { verifyGoogleIdToken } from './googleAuth.js';
 import {
@@ -21,11 +15,20 @@ import {
 } from './paddleConfig.js';
 import {
   checkUserProInSupabase,
+  claimUserDailyRewardInSupabase,
+  getUserDailyRewardsFromSupabase,
+  getUserWorldFromSupabase,
   getVerifiedUserFromSupabase,
   isSupabaseAdminConfigured,
   recordVerifiedPaddlePurchase,
+  saveUserWorldInSupabase,
   upsertVerifiedGoogleUserInSupabase,
 } from './supabaseAdmin.js';
+import {
+  isEligibleSecretGiftAsset,
+  STARTER_FREE_ASSET_IDS,
+  validateAndSanitizeWorldSave,
+} from './worldValidation.js';
 
 export function createApiApp() {
   const app = express();
@@ -58,8 +61,8 @@ export function createApiApp() {
     }
   );
 
-  // Standard JSON parser for all remaining API routes
-  app.use(express.json({ limit: '10mb' }));
+  // Standard JSON parser for all remaining API routes (bounded to 2MB for safety)
+  app.use(express.json({ limit: '2mb' }));
 
   // Development-only internal data cache reset (disabled in production)
   app.all('/api/clear-cache', (_req: Request, res: Response) => {
@@ -348,62 +351,208 @@ export function createApiApp() {
     }
   });
 
-  // 1. Get user world by User ID
-  app.get('/api/worlds/:userId', (req: Request, res: Response) => {
-    const { userId } = req.params;
-    const worlds = readJsonFile<Record<string, any>>(WORLDS_FILE, {});
-    const userWorld = worlds[userId];
-    if (userWorld) {
-      return res.json({ success: true, world: userWorld });
+  async function requireVerifiedOwner(req: Request, res: Response) {
+    const session = getAuthenticatedSession(req);
+    if (!session || session.provider !== 'google') {
+      res.status(401).json({
+        success: false,
+        error: 'Verified Google Sign-In session is required.',
+      });
+      return null;
     }
-    return res.json({ success: true, world: null });
+
+    const requestedUserId = String(req.params.userId || '').trim();
+    if (!requestedUserId || requestedUserId !== session.uid) {
+      res.status(403).json({
+        success: false,
+        error: 'Forbidden: requested account does not match your signed-in session.',
+      });
+      return null;
+    }
+
+    if (!isSupabaseAdminConfigured()) {
+      res.status(503).json({
+        success: false,
+        error: 'Persistent cloud storage is not configured on the server.',
+      });
+      return null;
+    }
+
+    const verifiedUser = await getVerifiedUserFromSupabase(session.uid);
+    if (!verifiedUser) {
+      clearSessionCookie(req, res);
+      res.status(401).json({
+        success: false,
+        error: 'Session is no longer valid. Please sign in with Google again.',
+      });
+      return null;
+    }
+
+    return verifiedUser;
+  }
+
+  // 1. Get authenticated Google user's saved world from Supabase
+  app.get('/api/worlds/:userId', async (req: Request, res: Response) => {
+    try {
+      const verifiedUser = await requireVerifiedOwner(req, res);
+      if (!verifiedUser) return;
+
+      const world = await getUserWorldFromSupabase(verifiedUser.id);
+      return res.json({ success: true, world });
+    } catch (err: any) {
+      console.error('[Load World Error]', err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Failed to load world from cloud storage.',
+      });
+    }
   });
 
-  // 2. Save user world by User ID
-  app.post('/api/worlds/:userId', (req: Request, res: Response) => {
-    const { userId } = req.params;
-    const worldData = req.body;
-    if (!worldData) {
-      return res.status(400).json({ success: false, error: 'No world data provided' });
+  // 2. Save authenticated Google user's world to Supabase with optimistic concurrency (revision)
+  app.post('/api/worlds/:userId', async (req: Request, res: Response) => {
+    try {
+      const verifiedUser = await requireVerifiedOwner(req, res);
+      if (!verifiedUser) return;
+
+      const env = getPaddleEnvironment();
+      const [existingWorld, rewardState] = await Promise.all([
+        getUserWorldFromSupabase(verifiedUser.id),
+        getUserDailyRewardsFromSupabase(verifiedUser.id, env),
+      ]);
+
+      const serverUnlockedAssetIds = new Set<string>([
+        ...STARTER_FREE_ASSET_IDS,
+        ...(existingWorld?.unlockedAssetIds || []),
+        ...rewardState.unlockedAssetIds,
+      ]);
+
+      const validated = validateAndSanitizeWorldSave({
+        rawBody: req.body,
+        userId: verifiedUser.id,
+        existingWorld,
+        serverUnlockedAssetIds,
+        isPro: verifiedUser.isPro,
+      });
+
+      if (validated.ok === false) {
+        return res.status(validated.status).json({
+          success: false,
+          error: validated.error,
+        });
+      }
+
+      const saved = await saveUserWorldInSupabase(verifiedUser.id, validated.data);
+
+      if (saved.conflict || !saved.applied) {
+        return res.status(409).json({
+          success: false,
+          conflict: true,
+          error: 'A newer version of this world was saved from another session or device.',
+          revision: saved.revision,
+          updatedAt: saved.updatedAt,
+          unlockedAssetIds: saved.unlockedAssetIds,
+          serverWorld: saved.serverWorld,
+        });
+      }
+
+      return res.json({
+        success: true,
+        mode: 'cloud',
+        revision: saved.revision,
+        updatedAt: saved.updatedAt,
+        unlockedAssetIds: saved.unlockedAssetIds,
+      });
+    } catch (err: any) {
+      console.error('[Save World Error]', err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Failed to save world to cloud storage.',
+      });
     }
-
-    const worlds = readJsonFile<Record<string, any>>(WORLDS_FILE, {});
-    worlds[userId] = {
-      ...worldData,
-      updatedAt: new Date().toISOString(),
-    };
-    writeJsonFile(WORLDS_FILE, worlds);
-
-    return res.json({ success: true, mode: 'cloud' });
   });
 
-  // 3. Claim daily reward in cloud
-  app.post('/api/daily_rewards/:userId', (req: Request, res: Response) => {
-    const { userId } = req.params;
-    const { date, assetId } = req.body;
-    if (!date || !assetId) {
-      return res.status(400).json({ success: false, error: 'Missing date or assetId' });
+  // 3. Claim a verified Secret Gift in Supabase (fixed 3/day UTC limit for Free, unlimited for Pro)
+  app.post('/api/daily_rewards/:userId', async (req: Request, res: Response) => {
+    try {
+      const verifiedUser = await requireVerifiedOwner(req, res);
+      if (!verifiedUser) return;
+
+      const assetId = String(
+        req.body?.assetId || req.body?.record?.reward_type || ''
+      ).trim();
+
+      if (!assetId || !isEligibleSecretGiftAsset(assetId)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid or ineligible Secret Gift asset ID.',
+        });
+      }
+
+      const rawWorldId = req.body?.worldId ?? req.body?.record?.world_id ?? null;
+      const worldId =
+        typeof rawWorldId === 'string' && rawWorldId.trim()
+          ? rawWorldId.trim().slice(0, 128)
+          : null;
+
+      const result = await claimUserDailyRewardInSupabase(
+        verifiedUser.id,
+        assetId,
+        worldId,
+        getPaddleEnvironment()
+      );
+
+      if (result.reason === 'daily_limit_reached') {
+        return res.status(429).json({
+          success: false,
+          error:
+            'Daily limit reached! Free accounts can unlock up to 3 Secret Gifts per UTC day. Upgrade to Christmas Pro for unlimited access!',
+          ...result,
+        });
+      }
+
+      if (result.reason === 'already_claimed_asset_today') {
+        return res.status(409).json({
+          success: false,
+          error: 'You already unwrapped this Secret Gift today.',
+          ...result,
+        });
+      }
+
+      return res.json({
+        success: true,
+        ...result,
+      });
+    } catch (err: any) {
+      console.error('[Claim Daily Reward Error]', err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Failed to claim daily reward.',
+      });
     }
-
-    const rewards = readJsonFile<Record<string, any[]>>(REWARDS_FILE, {});
-    const userRewards = rewards[userId] || [];
-
-    if (userRewards.some((r) => r.date === date)) {
-      return res.status(409).json({ success: false, error: "Today's gift already claimed!" });
-    }
-
-    userRewards.push({ date, assetId, claimedAt: new Date().toISOString() });
-    rewards[userId] = userRewards;
-    writeJsonFile(REWARDS_FILE, rewards);
-
-    return res.json({ success: true });
   });
 
-  // 4. Check user daily rewards
-  app.get('/api/daily_rewards/:userId', (req: Request, res: Response) => {
-    const { userId } = req.params;
-    const rewards = readJsonFile<Record<string, any[]>>(REWARDS_FILE, {});
-    return res.json({ success: true, rewards: rewards[userId] || [] });
+  // 4. Get authenticated user's persistent daily rewards state from Supabase (UTC day)
+  app.get('/api/daily_rewards/:userId', async (req: Request, res: Response) => {
+    try {
+      const verifiedUser = await requireVerifiedOwner(req, res);
+      if (!verifiedUser) return;
+
+      const state = await getUserDailyRewardsFromSupabase(
+        verifiedUser.id,
+        getPaddleEnvironment()
+      );
+
+      return res.json({
+        success: true,
+        ...state,
+      });
+    } catch (err: any) {
+      console.error('[Get Daily Rewards Error]', err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Failed to load daily rewards.',
+      });
+    }
   });
 
   return app;

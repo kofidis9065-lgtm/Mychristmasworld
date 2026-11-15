@@ -1,9 +1,16 @@
 import { World, LandscapeType, PlacedObject } from './worldTypes';
-import { supabase, isSupabaseConfigured } from '../../lib/supabase';
-import { AppUser, saveWorldToCloudBackend, loadWorldFromCloudBackend } from '../auth/userAuthService';
-import { DEFAULT_FREE_ASSET_IDS } from '../../game/assets/assetCatalog';
+import {
+  AppUser,
+  CloudSaveResult,
+  saveWorldToCloudBackend,
+  loadWorldFromCloudBackendResult,
+} from '../auth/userAuthService';
+import { DEFAULT_FREE_ASSET_IDS, isAssetUnlocked } from '../../game/assets/assetCatalog';
+import { getGuestClaimedDailyGiftAssetIds } from '../gifts/giftService';
 
-const LOCAL_STORAGE_KEY = 'mcw_saved_world_v1';
+const GUEST_STORAGE_KEY = 'mcw_guest_world_v1';
+const LEGACY_LOCAL_STORAGE_KEY = 'mcw_saved_world_v1';
+const CLOUD_WORLD_CACHE_PREFIX = 'mcw_cloud_world_cache_';
 const GUEST_ID = 'guest-local-user';
 
 export const PRO_ONLY_LANDSCAPES: readonly LandscapeType[] = ['wonderworld'];
@@ -195,17 +202,111 @@ export const DEFAULT_LANDSCAPE_DECORATIONS: Record<LandscapeType, PlacedObject[]
 };
 
 export function getClaimedDailyGiftAssetIds(): string[] {
+  return getGuestClaimedDailyGiftAssetIds();
+}
+
+function normalizeLoadedWorld(raw: World, includeGuestClaims: boolean): World {
+  const landscapeType: LandscapeType = raw.landscapeType || 'village';
+  const placedObjects: PlacedObject[] = Array.isArray(raw.placedObjects)
+    ? raw.placedObjects
+    : [];
+
+  const defaultDecs = JSON.parse(JSON.stringify(DEFAULT_LANDSCAPE_DECORATIONS)) as Record<
+    LandscapeType,
+    PlacedObject[]
+  >;
+  const mergedDecs: Record<LandscapeType, PlacedObject[]> = {
+    village: Array.isArray(raw.landscapeDecorations?.village)
+      ? raw.landscapeDecorations.village
+      : defaultDecs.village,
+    mountain: Array.isArray(raw.landscapeDecorations?.mountain)
+      ? raw.landscapeDecorations.mountain
+      : defaultDecs.mountain,
+    river: Array.isArray(raw.landscapeDecorations?.river)
+      ? raw.landscapeDecorations.river
+      : defaultDecs.river,
+    city: Array.isArray(raw.landscapeDecorations?.city)
+      ? raw.landscapeDecorations.city
+      : defaultDecs.city,
+    wonderworld: Array.isArray(raw.landscapeDecorations?.wonderworld)
+      ? raw.landscapeDecorations.wonderworld
+      : [],
+  };
+
+  if (!raw.landscapeDecorations) {
+    mergedDecs[landscapeType] = placedObjects;
+  }
+
+  const baseUnlocked = Array.isArray(raw.unlockedAssetIds)
+    ? raw.unlockedAssetIds
+    : [...DEFAULT_FREE_ASSET_IDS];
+  const extraClaims = includeGuestClaims ? getGuestClaimedDailyGiftAssetIds() : [];
+  const unlockedAssetIds = Array.from(
+    new Set([...DEFAULT_FREE_ASSET_IDS, ...baseUnlocked, ...extraClaims])
+  );
+
+  return {
+    ...raw,
+    landscapeType,
+    placedObjects,
+    landscapeDecorations: mergedDecs,
+    unlockedAssetIds,
+    revision: typeof raw.revision === 'number' ? raw.revision : 0,
+  };
+}
+
+function readGuestWorldFromStorage(): World | null {
   try {
-    const raw = localStorage.getItem('mcw_claimed_daily_gifts_v1');
-    if (!raw) return [];
-    const list = JSON.parse(raw);
-    if (Array.isArray(list)) {
-      return list.map((item: any) => item.assetId).filter(Boolean);
+    const rawGuest = localStorage.getItem(GUEST_STORAGE_KEY);
+    if (rawGuest) {
+      const parsed = JSON.parse(rawGuest) as World;
+      if (parsed && Array.isArray(parsed.placedObjects)) {
+        return normalizeLoadedWorld(parsed, true);
+      }
+    }
+
+    // Non-destructive read fallback from legacy dev/test local storage key
+    const rawLegacy = localStorage.getItem(LEGACY_LOCAL_STORAGE_KEY);
+    if (rawLegacy) {
+      const parsed = JSON.parse(rawLegacy) as World;
+      if (parsed && Array.isArray(parsed.placedObjects)) {
+        return normalizeLoadedWorld(parsed, true);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to parse guest local storage world:', err);
+  }
+  return null;
+}
+
+function writeGuestWorldToStorage(world: World): void {
+  try {
+    localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(world));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+function readGoogleCloudCache(userId: string): World | null {
+  try {
+    const raw = localStorage.getItem(`${CLOUD_WORLD_CACHE_PREFIX}${userId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as World;
+    if (parsed && Array.isArray(parsed.placedObjects)) {
+      return normalizeLoadedWorld(parsed, false);
     }
   } catch {
     // ignore
   }
-  return [];
+  return null;
+}
+
+function writeGoogleCloudCache(userId: string, world: World): void {
+  try {
+    localStorage.setItem(`${CLOUD_WORLD_CACHE_PREFIX}${userId}`, JSON.stringify(world));
+  } catch {
+    // ignore
+  }
 }
 
 export function createDefaultWorld(landscapeType: LandscapeType = 'village', userId?: string): World {
@@ -213,7 +314,8 @@ export function createDefaultWorld(landscapeType: LandscapeType = 'village', use
   const decorations = JSON.parse(JSON.stringify(DEFAULT_LANDSCAPE_DECORATIONS));
   const activeObjects = decorations[landscapeType] || decorations.village;
 
-  const claimedAssetIds = getClaimedDailyGiftAssetIds();
+  const isGuest = !userId || userId === GUEST_ID;
+  const claimedAssetIds = isGuest ? getGuestClaimedDailyGiftAssetIds() : [];
   const unlocked = Array.from(new Set([...DEFAULT_FREE_ASSET_IDS, ...claimedAssetIds]));
 
   return {
@@ -237,14 +339,87 @@ export function createDefaultWorld(landscapeType: LandscapeType = 'village', use
     createdAt: now,
     updatedAt: now,
     version: 1,
+    revision: 0,
+  };
+}
+
+/**
+ * Prepares a clean initial cloud world for a Google user who does not yet have a row
+ * in Supabase `user_worlds`. Ensures only server-authorized assets are included so
+ * the initial save complies with strict backend validation without losing free decorations.
+ */
+export function sanitizeWorldForFirstCloudSave(
+  sourceWorld: World,
+  userId: string,
+  isProUser: boolean,
+  serverUnlockedAssetIds: string[] = []
+): World {
+  const authorizedIds = Array.from(
+    new Set([...DEFAULT_FREE_ASSET_IDS, ...serverUnlockedAssetIds])
+  );
+  const { world: freeSafeWorld } = enforceFreeLandscapeAccess(sourceWorld, isProUser);
+
+  const filterAuthorized = (objects: PlacedObject[]): PlacedObject[] =>
+    (Array.isArray(objects) ? objects : []).filter((obj) =>
+      isAssetUnlocked(obj.assetType, authorizedIds, isProUser)
+    );
+
+  const defaultDecs = JSON.parse(JSON.stringify(DEFAULT_LANDSCAPE_DECORATIONS)) as Record<
+    LandscapeType,
+    PlacedObject[]
+  >;
+  const sourceDecs = freeSafeWorld.landscapeDecorations || defaultDecs;
+
+  const sanitizedDecs: Record<LandscapeType, PlacedObject[]> = {
+    village: filterAuthorized(sourceDecs.village || defaultDecs.village),
+    mountain: filterAuthorized(sourceDecs.mountain || defaultDecs.mountain),
+    river: filterAuthorized(sourceDecs.river || defaultDecs.river),
+    city: filterAuthorized(sourceDecs.city || defaultDecs.city),
+    wonderworld: isProUser ? filterAuthorized(sourceDecs.wonderworld || []) : [],
+  };
+
+  const sanitizedActive = filterAuthorized(
+    freeSafeWorld.placedObjects || sanitizedDecs[freeSafeWorld.landscapeType] || []
+  );
+  sanitizedDecs[freeSafeWorld.landscapeType] = sanitizedActive;
+
+  return {
+    ...freeSafeWorld,
+    ownerUserId: userId,
+    placedObjects: sanitizedActive,
+    landscapeDecorations: sanitizedDecs,
+    unlockedAssetIds: authorizedIds,
+    revision: 0,
+  };
+}
+
+export async function loadGoogleCloudWorld(
+  appUser: AppUser
+): Promise<{ exists: boolean; world: World | null; networkError: boolean }> {
+  const res = await loadWorldFromCloudBackendResult(appUser.id);
+  if (res.ok && res.exists && res.world) {
+    const normalized = normalizeLoadedWorld(res.world as World, false);
+    writeGoogleCloudCache(appUser.id, normalized);
+    return { exists: true, world: normalized, networkError: false };
+  }
+
+  if (res.ok && !res.exists) {
+    return { exists: false, world: null, networkError: false };
+  }
+
+  const cached = readGoogleCloudCache(appUser.id);
+  return {
+    exists: Boolean(cached),
+    world: cached,
+    networkError: true,
   };
 }
 
 export async function saveWorld(
   world: World,
-  user: any | null,
+  _user: any | null,
   appUser?: AppUser | null
-): Promise<{ success: boolean; mode: 'cloud' | 'local'; error?: string }> {
+): Promise<CloudSaveResult> {
   try {
     const updatedWorld: World = {
       ...world,
@@ -252,166 +427,55 @@ export async function saveWorld(
       updatedAt: new Date().toISOString(),
     };
 
-    // Always keep local storage updated as a fast cache / offline fallback
-    try {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedWorld));
-    } catch {
-      // ignore
-    }
+    // 1. Authenticated Google User -> Authoritative Supabase Cloud Backend
+    if (appUser && appUser.provider === 'google') {
+      const res = await saveWorldToCloudBackend(
+        { ...updatedWorld, ownerUserId: appUser.id },
+        appUser.id
+      );
 
-    // 1. Account Cloud Server Persistence
-    if (appUser) {
-      const res = await saveWorldToCloudBackend(updatedWorld, appUser.id);
+      if (res.success) {
+        const syncedWorld: World = {
+          ...updatedWorld,
+          ownerUserId: appUser.id,
+          revision: typeof res.revision === 'number' ? res.revision : updatedWorld.revision,
+          updatedAt: res.updatedAt || updatedWorld.updatedAt,
+          unlockedAssetIds: res.unlockedAssetIds || updatedWorld.unlockedAssetIds,
+        };
+        writeGoogleCloudCache(appUser.id, syncedWorld);
+      } else if (res.conflict && res.serverWorld) {
+        writeGoogleCloudCache(
+          appUser.id,
+          normalizeLoadedWorld(res.serverWorld as World, false)
+        );
+      }
+
       return res;
     }
 
-    // 2. Supabase Cloud Persistence (if configured)
-    if (isSupabaseConfigured && supabase && user) {
-      const dbPayload = {
-        owner_user_id: user.id,
-        name: updatedWorld.name,
-        landscape_type: updatedWorld.landscapeType,
-        placed_objects: updatedWorld.placedObjects,
-        camera_state: updatedWorld.cameraState,
-        settings: {
-          ...updatedWorld.settings,
-          unlockedAssetIds: updatedWorld.unlockedAssetIds,
-        },
-        version: updatedWorld.version || 1,
-        updated_at: updatedWorld.updatedAt,
-      };
-
-      const { data: existing } = await supabase
-        .from('worlds')
-        .select('id')
-        .eq('owner_user_id', user.id)
-        .limit(1)
-        .maybeSingle();
-
-      if (existing) {
-        const { error } = await supabase
-          .from('worlds')
-          .update(dbPayload)
-          .eq('id', existing.id);
-
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('worlds').insert([
-          {
-            ...dbPayload,
-            id: updatedWorld.id.startsWith('world_') ? undefined : updatedWorld.id,
-          },
-        ]);
-        if (error) throw error;
-      }
-
-      return { success: true, mode: 'cloud' };
-    }
-
+    // 2. Guest Mode -> Isolated Guest localStorage
+    writeGuestWorldToStorage(updatedWorld);
     return { success: true, mode: 'local' };
   } catch (err: any) {
     console.error('Save world error:', err);
-    return { success: false, mode: 'local', error: err.message || 'Unknown save error' };
+    return {
+      success: false,
+      mode: appUser ? 'cloud' : 'local',
+      error: err?.message || 'Unknown save error',
+    };
   }
 }
 
 export async function loadWorld(
-  user: any | null,
+  _user: any | null,
   appUser?: AppUser | null
 ): Promise<World | null> {
-  // 1. Try Account Cloud Server first if logged in
-  if (appUser) {
-    try {
-      const cloudWorld = await loadWorldFromCloudBackend(appUser.id);
-      if (cloudWorld && Array.isArray(cloudWorld.placedObjects)) {
-        const claimed = getClaimedDailyGiftAssetIds();
-        const baseUnlocked = cloudWorld.unlockedAssetIds || [...DEFAULT_FREE_ASSET_IDS];
-        cloudWorld.unlockedAssetIds = Array.from(new Set([...baseUnlocked, ...claimed]));
-
-        if (!cloudWorld.landscapeDecorations) {
-          const decs = JSON.parse(JSON.stringify(DEFAULT_LANDSCAPE_DECORATIONS));
-          decs[cloudWorld.landscapeType] = cloudWorld.placedObjects;
-          cloudWorld.landscapeDecorations = decs;
-        }
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cloudWorld));
-        return cloudWorld;
-      }
-    } catch (err) {
-      console.warn('Could not load from Google Cloud server:', err);
-    }
+  // 1. Authenticated Google User -> Load exclusively from Supabase cloud (never guest localStorage)
+  if (appUser && appUser.provider === 'google') {
+    const cloudRes = await loadGoogleCloudWorld(appUser);
+    return cloudRes.world;
   }
 
-  // 2. Try Supabase Cloud
-  if (isSupabaseConfigured && supabase && user) {
-    try {
-      const { data, error } = await supabase
-        .from('worlds')
-        .select('*')
-        .eq('owner_user_id', user.id)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (!error && data) {
-        const cloudDecorations = data.settings?.landscapeDecorations || (() => {
-          const decs = JSON.parse(JSON.stringify(DEFAULT_LANDSCAPE_DECORATIONS));
-          decs[data.landscape_type as LandscapeType] = data.placed_objects || [];
-          return decs;
-        })();
-
-        const claimed = getClaimedDailyGiftAssetIds();
-        const baseUnlocked = data.settings?.unlockedAssetIds || [...DEFAULT_FREE_ASSET_IDS];
-        const unlocked = Array.from(new Set([...baseUnlocked, ...claimed]));
-
-        const cloudWorld: World = {
-          id: data.id,
-          ownerUserId: data.owner_user_id,
-          name: data.name,
-          landscapeType: data.landscape_type as LandscapeType,
-          placedObjects: data.placed_objects || [],
-          landscapeDecorations: cloudDecorations,
-          unlockedAssetIds: unlocked,
-          cameraState: data.camera_state,
-          settings: data.settings || {
-            timeOfDay: 'night',
-            snowfallDensity: 'moderate',
-            soundEnabled: true,
-            bloomEnabled: true,
-          },
-          createdAt: data.created_at,
-          updatedAt: data.updated_at,
-          version: data.version || 1,
-        };
-
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cloudWorld));
-        return cloudWorld;
-      }
-    } catch (err) {
-      console.warn('Could not load from Supabase cloud:', err);
-    }
-  }
-
-  // 3. Fall back to local storage
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as World;
-      if (parsed && Array.isArray(parsed.placedObjects)) {
-        const claimed = getClaimedDailyGiftAssetIds();
-        const baseUnlocked = parsed.unlockedAssetIds || [...DEFAULT_FREE_ASSET_IDS];
-        parsed.unlockedAssetIds = Array.from(new Set([...baseUnlocked, ...claimed]));
-
-        if (!parsed.landscapeDecorations) {
-          const decs = JSON.parse(JSON.stringify(DEFAULT_LANDSCAPE_DECORATIONS));
-          decs[parsed.landscapeType] = parsed.placedObjects;
-          parsed.landscapeDecorations = decs;
-        }
-        return parsed;
-      }
-    }
-  } catch (err) {
-    console.error('Failed to parse local storage world:', err);
-  }
-
-  return null;
+  // 2. Guest Mode -> Isolated Guest localStorage
+  return readGuestWorldFromStorage();
 }

@@ -1,5 +1,12 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { getPaddleEnvironment, PaddleEnvironment } from './paddleConfig.js';
+import {
+  FREE_DAILY_GIFT_LIMIT,
+  getUtcTodayDateString,
+  SanitizedWorldSaveInput,
+  STARTER_FREE_ASSET_IDS,
+  StoredWorldRecord,
+} from './worldValidation.js';
 
 let cachedAdminClient: SupabaseClient | null = null;
 
@@ -423,4 +430,310 @@ export async function revokePaddlePurchaseByTransaction(input: {
   }
 
   return { revoked: true, userId: existing.user_id };
+}
+
+export interface DailyRewardRowRecord {
+  id: string;
+  reward_date: string;
+  date: string;
+  asset_id: string;
+  assetId: string;
+  world_id: string | null;
+  claimed_at: string;
+  claimedAt: string;
+}
+
+export interface DailyRewardsStateResult {
+  rewards: DailyRewardRowRecord[];
+  todayDate: string;
+  todayCount: number;
+  dailyLimit: number;
+  remainingToday: number | null;
+  isPro: boolean;
+  unlockedAssetIds: string[];
+}
+
+export async function getUserDailyRewardsFromSupabase(
+  userId: string,
+  env: PaddleEnvironment = getPaddleEnvironment()
+): Promise<DailyRewardsStateResult> {
+  const client = requireSupabaseAdmin();
+  await ensureBillingEnvironmentSynced(client, env);
+
+  const [{ data: rows, error }, isPro] = await Promise.all([
+    client
+      .from('user_daily_rewards')
+      .select('id, reward_date, asset_id, world_id, claimed_at')
+      .eq('user_id', userId)
+      .order('claimed_at', { ascending: true }),
+    checkUserProInSupabase(userId, env),
+  ]);
+
+  if (error) {
+    throw new Error(`Failed loading daily rewards: ${error.message}`);
+  }
+
+  const todayDate = getUtcTodayDateString();
+  const normalizedRows: DailyRewardRowRecord[] = (Array.isArray(rows) ? rows : []).map((row: any) => ({
+    id: String(row.id),
+    reward_date: String(row.reward_date),
+    date: String(row.reward_date),
+    asset_id: String(row.asset_id),
+    assetId: String(row.asset_id),
+    world_id: row.world_id ? String(row.world_id) : null,
+    claimed_at: String(row.claimed_at),
+    claimedAt: String(row.claimed_at),
+  }));
+
+  const todayCount = normalizedRows.filter((r) => r.reward_date === todayDate).length;
+  const unlockedAssetIds = Array.from(
+    new Set(
+      normalizedRows
+        .map((r) => r.asset_id)
+        .filter((id) => Boolean(id) && !id.startsWith('pro_'))
+    )
+  );
+
+  return {
+    rewards: normalizedRows,
+    todayDate,
+    todayCount,
+    dailyLimit: FREE_DAILY_GIFT_LIMIT,
+    remainingToday: isPro ? null : Math.max(0, FREE_DAILY_GIFT_LIMIT - todayCount),
+    isPro,
+    unlockedAssetIds,
+  };
+}
+
+export interface ClaimDailyRewardRpcResult {
+  claimed: boolean;
+  alreadyClaimedToday: boolean;
+  reason: string;
+  rewardDate: string;
+  todayCount: number;
+  dailyLimit: number;
+  remainingToday: number | null;
+  isPro: boolean;
+  worldRevision: number | null;
+  unlockedAssetIds: string[];
+}
+
+export async function claimUserDailyRewardInSupabase(
+  userId: string,
+  assetId: string,
+  worldId?: string | null,
+  env: PaddleEnvironment = getPaddleEnvironment()
+): Promise<ClaimDailyRewardRpcResult> {
+  const client = requireSupabaseAdmin();
+  await ensureBillingEnvironmentSynced(client, env);
+
+  const { data, error } = await client.rpc('mcw_claim_daily_reward', {
+    p_user_id: userId,
+    p_asset_id: assetId,
+    p_world_id: worldId || null,
+  });
+
+  if (error) {
+    throw new Error(`Failed claiming daily reward: ${error.message}`);
+  }
+
+  const row: any = Array.isArray(data) ? data[0] : data;
+  if (!row) {
+    throw new Error('Empty response from mcw_claim_daily_reward RPC.');
+  }
+
+  const rawUnlocked = Array.isArray(row.unlocked_asset_ids) ? row.unlocked_asset_ids : [];
+  const unlockedAssetIds = Array.from(
+    new Set([
+      ...STARTER_FREE_ASSET_IDS,
+      ...rawUnlocked.filter((id: unknown): id is string => typeof id === 'string' && !id.startsWith('pro_')),
+    ])
+  );
+
+  return {
+    claimed: Boolean(row.claimed),
+    alreadyClaimedToday: Boolean(row.already_claimed_today),
+    reason: String(row.reason || ''),
+    rewardDate: String(row.reward_date || getUtcTodayDateString()),
+    todayCount: Number(row.today_count ?? 0),
+    dailyLimit: Number(row.daily_limit ?? FREE_DAILY_GIFT_LIMIT),
+    remainingToday:
+      row.remaining_today === null || row.remaining_today === undefined
+        ? null
+        : Number(row.remaining_today),
+    isPro: Boolean(row.is_pro),
+    worldRevision:
+      row.world_revision === null || row.world_revision === undefined
+        ? null
+        : Number(row.world_revision),
+    unlockedAssetIds,
+  };
+}
+
+function mapWorldRowToRecord(
+  row: any,
+  rewardUnlockedIds: string[] = []
+): StoredWorldRecord {
+  const existingUnlocked = Array.isArray(row.unlocked_asset_ids)
+    ? row.unlocked_asset_ids.filter(
+        (id: unknown): id is string => typeof id === 'string' && id.trim().length > 0 && !id.startsWith('pro_')
+      )
+    : [];
+
+  const unlockedAssetIds = Array.from(
+    new Set([...STARTER_FREE_ASSET_IDS, ...existingUnlocked, ...rewardUnlockedIds])
+  );
+
+  return {
+    id: String(row.world_id || `world_${row.user_id}`),
+    ownerUserId: String(row.user_id),
+    name: String(row.name || 'My Christmas World'),
+    landscapeType: row.landscape_type || 'village',
+    placedObjects: Array.isArray(row.placed_objects) ? row.placed_objects : [],
+    landscapeDecorations:
+      row.landscape_decorations && typeof row.landscape_decorations === 'object'
+        ? row.landscape_decorations
+        : {
+            village: [],
+            mountain: [],
+            river: [],
+            city: [],
+            wonderworld: [],
+          },
+    unlockedAssetIds,
+    cameraState: row.camera_state || null,
+    settings: row.settings || {
+      timeOfDay: 'night',
+      snowfallDensity: 'moderate',
+      soundEnabled: true,
+      bloomEnabled: true,
+    },
+    version: Number(row.schema_version || 1),
+    revision: Number(row.revision || 1),
+    createdAt: String(row.created_at || new Date().toISOString()),
+    updatedAt: String(row.updated_at || new Date().toISOString()),
+  };
+}
+
+export async function getUserWorldFromSupabase(userId: string): Promise<StoredWorldRecord | null> {
+  const client = requireSupabaseAdmin();
+  const [{ data: row, error }, { data: rewardRows, error: rewardErr }] = await Promise.all([
+    client
+      .from('user_worlds')
+      .select(
+        'user_id, world_id, name, landscape_type, placed_objects, landscape_decorations, unlocked_asset_ids, camera_state, settings, schema_version, revision, created_at, updated_at'
+      )
+      .eq('user_id', userId)
+      .maybeSingle(),
+    client.from('user_daily_rewards').select('asset_id').eq('user_id', userId),
+  ]);
+
+  if (error) {
+    throw new Error(`Failed loading user world: ${error.message}`);
+  }
+  if (rewardErr) {
+    throw new Error(`Failed loading reward unlocks: ${rewardErr.message}`);
+  }
+  if (!row) {
+    return null;
+  }
+
+  const rewardUnlocked = (Array.isArray(rewardRows) ? rewardRows : [])
+    .map((r: any) => String(r.asset_id || ''))
+    .filter((id) => Boolean(id) && !id.startsWith('pro_'));
+
+  return mapWorldRowToRecord(row, rewardUnlocked);
+}
+
+export interface SaveWorldRpcResult {
+  applied: boolean;
+  conflict: boolean;
+  revision: number;
+  updatedAt: string | null;
+  unlockedAssetIds: string[];
+  serverWorld: StoredWorldRecord | null;
+}
+
+export async function saveUserWorldInSupabase(
+  userId: string,
+  input: SanitizedWorldSaveInput
+): Promise<SaveWorldRpcResult> {
+  const client = requireSupabaseAdmin();
+
+  const { data, error } = await client.rpc('mcw_save_user_world', {
+    p_user_id: userId,
+    p_world_id: input.worldId,
+    p_name: input.name,
+    p_landscape_type: input.landscapeType,
+    p_placed_objects: input.placedObjects,
+    p_landscape_decorations: input.landscapeDecorations,
+    p_camera_state: input.cameraState,
+    p_settings: input.settings,
+    p_schema_version: input.schemaVersion,
+    p_expected_revision: input.expectedRevision,
+    p_client_updated_at: input.clientUpdatedAt,
+  });
+
+  if (error) {
+    throw new Error(`Failed saving world to Supabase: ${error.message}`);
+  }
+
+  const row: any = Array.isArray(data) ? data[0] : data;
+  if (!row) {
+    throw new Error('Empty response from mcw_save_user_world RPC.');
+  }
+
+  const rawUnlocked = Array.isArray(row.unlocked_asset_ids) ? row.unlocked_asset_ids : [];
+  const unlockedAssetIds = Array.from(
+    new Set([
+      ...STARTER_FREE_ASSET_IDS,
+      ...rawUnlocked.filter((id: unknown): id is string => typeof id === 'string' && !id.startsWith('pro_')),
+    ])
+  );
+
+  let serverWorld: StoredWorldRecord | null = null;
+  if (row.server_world && typeof row.server_world === 'object') {
+    const sw = row.server_world;
+    const swUnlocked = Array.isArray(sw.unlockedAssetIds) ? sw.unlockedAssetIds : [];
+    serverWorld = {
+      id: String(sw.id || `world_${userId}`),
+      ownerUserId: String(sw.ownerUserId || userId),
+      name: String(sw.name || 'My Christmas World'),
+      landscapeType: sw.landscapeType || 'village',
+      placedObjects: Array.isArray(sw.placedObjects) ? sw.placedObjects : [],
+      landscapeDecorations: sw.landscapeDecorations || {
+        village: [],
+        mountain: [],
+        river: [],
+        city: [],
+        wonderworld: [],
+      },
+      unlockedAssetIds: Array.from(
+        new Set([
+          ...STARTER_FREE_ASSET_IDS,
+          ...swUnlocked.filter((id: unknown): id is string => typeof id === 'string' && !id.startsWith('pro_')),
+        ])
+      ),
+      cameraState: sw.cameraState || null,
+      settings: sw.settings || {
+        timeOfDay: 'night',
+        snowfallDensity: 'moderate',
+        soundEnabled: true,
+        bloomEnabled: true,
+      },
+      version: Number(sw.version || 1),
+      revision: Number(sw.revision || 1),
+      createdAt: String(sw.createdAt || new Date().toISOString()),
+      updatedAt: String(sw.updatedAt || new Date().toISOString()),
+    };
+  }
+
+  return {
+    applied: Boolean(row.applied),
+    conflict: Boolean(row.conflict),
+    revision: Number(row.revision ?? 0),
+    updatedAt: row.updated_at ? String(row.updated_at) : null,
+    unlockedAssetIds,
+    serverWorld,
+  };
 }

@@ -22,32 +22,6 @@ function resolveDataDir(): string {
 }
 
 export const DATA_DIR = resolveDataDir();
-export const WORLDS_FILE = path.join(DATA_DIR, 'worlds.json');
-export const REWARDS_FILE = path.join(DATA_DIR, 'daily_rewards.json');
-
-export function readJsonFile<T>(filePath: string, fallback: T): T {
-  try {
-    if (fs.existsSync(filePath)) {
-      const content = fs.readFileSync(filePath, 'utf-8');
-      return JSON.parse(content) as T;
-    }
-  } catch (err) {
-    console.error(`Error reading ${filePath}:`, err);
-  }
-  return fallback;
-}
-
-export function writeJsonFile<T>(filePath: string, data: T): void {
-  try {
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-  } catch (err) {
-    console.error(`Error writing ${filePath}:`, err);
-  }
-}
 
 export function clearDataDir(): void {
   if (fs.existsSync(DATA_DIR)) {

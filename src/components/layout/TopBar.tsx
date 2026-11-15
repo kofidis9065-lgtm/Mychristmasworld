@@ -45,6 +45,7 @@ interface Props {
   currentUser?: AppUser | null;
   googleUser?: any;
   dailyGiftAvailable: boolean;
+  showDailyGifts?: boolean;
   isProUser?: boolean;
   onTriggerSanta?: () => void;
   onOpenProModal?: () => void;
@@ -71,6 +72,7 @@ export const TopBar: React.FC<Props> = ({
   currentUser,
   googleUser,
   dailyGiftAvailable,
+  showDailyGifts = false,
   isProUser = false,
   onTriggerSanta,
   onOpenProModal,
@@ -195,27 +197,29 @@ export const TopBar: React.FC<Props> = ({
               )}
             </button>
 
-            {/* Daily Gift Button */}
-            <button
-              onClick={() => {
-                soundEngine.playClick();
-                onOpenGifts();
-              }}
-              className="relative festive-gradient flex items-center gap-1.5 py-1.5 px-2.5 sm:px-3 rounded-xl font-bold text-xs uppercase tracking-wider font-serif-display cursor-pointer"
-            >
-              <Gift className={`w-3.5 h-3.5 ${dailyGiftAvailable ? 'animate-bounce' : ''}`} />
-              <span className="hidden sm:inline">
-                {dailyGiftAvailable ? 'Daily Gifts' : 'Gifts'}
-              </span>
-              <span className="sm:hidden">Gifts</span>
-
-              {dailyGiftAvailable && (
-                <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-300"></span>
+            {/* Daily Gift Button (Strictly hidden for Pro users and while auth is hydrating) */}
+            {showDailyGifts && (
+              <button
+                onClick={() => {
+                  soundEngine.playClick();
+                  onOpenGifts();
+                }}
+                className="relative festive-gradient flex items-center gap-1.5 py-1.5 px-2.5 sm:px-3 rounded-xl font-bold text-xs uppercase tracking-wider font-serif-display cursor-pointer"
+              >
+                <Gift className={`w-3.5 h-3.5 ${dailyGiftAvailable ? 'animate-bounce' : ''}`} />
+                <span className="hidden sm:inline">
+                  {dailyGiftAvailable ? 'Daily Gifts' : 'Gifts'}
                 </span>
-              )}
-            </button>
+                <span className="sm:hidden">Gifts</span>
+
+                {dailyGiftAvailable && (
+                  <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-300"></span>
+                  </span>
+                )}
+              </button>
+            )}
 
             {/* Photo Snapshot Button */}
             <button

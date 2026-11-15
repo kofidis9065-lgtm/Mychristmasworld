@@ -40,6 +40,7 @@ export interface World {
   createdAt: string;
   updatedAt: string;
   version: number;
+  revision?: number;
 }
 
 export interface AssetDefinition {

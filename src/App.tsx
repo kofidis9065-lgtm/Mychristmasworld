@@ -14,12 +14,14 @@ import {
   createDefaultWorld,
   saveWorld,
   loadWorld,
+  loadGoogleCloudWorld,
+  sanitizeWorldForFirstCloudSave,
   DEFAULT_LANDSCAPE_DECORATIONS,
   enforceFreeLandscapeAccess,
   isProOnlyLandscape,
 } from './features/world/worldPersistence';
-import { isAssetUnlocked } from './game/assets/assetCatalog';
-import { checkDailyGiftClaimed } from './features/gifts/giftService';
+import { isAssetUnlocked, DEFAULT_FREE_ASSET_IDS } from './game/assets/assetCatalog';
+import { checkDailyGiftClaimed, fetchDailyRewardsState } from './features/gifts/giftService';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { soundEngine } from './lib/audioSynthesis';
 import { youtubeAudio } from './lib/youtubePlayerService';
@@ -63,27 +65,42 @@ export function App() {
     subtitle: string;
     type: 'sky' | 'ground';
   } | null>(null);
+  const [cloudNotice, setCloudNotice] = useState<string | null>(null);
 
   const canvasRef = useRef<WorldCanvasHandle | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
+  const bootDoneRef = useRef<boolean>(false);
+  const latestCloudRevRef = useRef<{ worldId: string; revision: number } | null>(null);
+  const currentUserRef = useRef<AppUser | null>(currentUser);
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
+
+  const showCloudNotice = useCallback((message: string) => {
+    setCloudNotice(message);
+    window.setTimeout(() => {
+      setCloudNotice((prev) => (prev === message ? null : prev));
+    }, 5500);
+  }, []);
 
   // 1. Initialize Auth, Pro Status, and Load Existing World
   useEffect(() => {
     const init = async () => {
-      let currentUser: User | null = null;
+      let supaUser: User | null = null;
       if (isSupabaseConfigured && supabase) {
         try {
           const { data } = await supabase.auth.getSession();
-          currentUser = data.session?.user || null;
-          if (currentUser?.email && currentUser.email.toLowerCase().includes('kofidis')) {
+          supaUser = data.session?.user || null;
+          if (supaUser?.email && supaUser.email.toLowerCase().includes('kofidis')) {
             try {
               await supabase.auth.signOut();
             } catch {
               // ignore
             }
-            currentUser = null;
+            supaUser = null;
           }
-          setUser(currentUser);
+          setUser(supaUser);
 
           supabase.auth.onAuthStateChange((_event, session) => {
             const u = session?.user || null;
@@ -100,28 +117,19 @@ export function App() {
 
       // Restore verified Google session & authoritative Pro entitlement from server HttpOnly cookie
       const serverSession = await fetchServerAuthSession();
-      const activeAppUser = serverSession.authenticated && serverSession.user
-        ? serverSession.user
-        : getStoredUser();
+      const activeAppUser =
+        serverSession.authenticated && serverSession.user ? serverSession.user : null;
 
-      if (serverSession.authenticated && serverSession.user) {
-        setCurrentUser(serverSession.user);
-      } else if (!activeAppUser) {
-        setCurrentUser(null);
-      }
+      setCurrentUser(activeAppUser);
+      currentUserRef.current = activeAppUser;
 
       // Server is authoritative for Pro status (never trust localStorage)
-      let proActive = false;
-      if (activeAppUser?.provider === 'google') {
-        proActive = serverSession.authenticated ? serverSession.isPro : await checkProStatus();
-      }
-      setIsProUser(proActive);
+      let proActive = activeAppUser?.provider === 'google' ? serverSession.isPro : false;
 
       // Handle Paddle Checkout redirect return (?pro_success=true)
       if (typeof window !== 'undefined' && window.location.search.includes('pro_success=true')) {
-        const refreshedPro = await checkProStatus();
+        const refreshedPro = activeAppUser?.provider === 'google' ? await checkProStatus() : false;
         if (refreshedPro) {
-          setIsProUser(true);
           proActive = true;
         }
         const url = new URL(window.location.href);
@@ -129,32 +137,110 @@ export function App() {
         window.history.replaceState({}, '', url.pathname + url.search + url.hash);
       }
 
-      // Check if world exists in cloud or local cache, and enforce free landscape fallback if unentitled
-      const saved = await loadWorld(currentUser, activeAppUser);
-      if (saved) {
-        const { world: safeSaved } = enforceFreeLandscapeAccess(saved, proActive);
-        setWorld(safeSaved);
-        setHasExistingSavedWorld(true);
-        if (activeAppUser) {
+      if (activeAppUser && activeAppUser.provider === 'google') {
+        const [cloudRes, rewardState] = await Promise.all([
+          loadGoogleCloudWorld(activeAppUser),
+          fetchDailyRewardsState(activeAppUser.id),
+        ]);
+
+        if (rewardState.ok && rewardState.isPro) {
+          proActive = true;
+        }
+        setIsProUser(proActive);
+        if (proActive) {
+          setIsGiftModalOpen(false);
+        }
+
+        if (cloudRes.exists && cloudRes.world) {
+          const mergedUnlocked = Array.from(
+            new Set([
+              ...DEFAULT_FREE_ASSET_IDS,
+              ...(cloudRes.world.unlockedAssetIds || []),
+              ...(rewardState.ok ? rewardState.unlockedAssetIds : []),
+            ])
+          );
+          const mergedWorld: World = {
+            ...cloudRes.world,
+            unlockedAssetIds: mergedUnlocked,
+          };
+          const { world: safeSaved } = enforceFreeLandscapeAccess(mergedWorld, proActive);
+          latestCloudRevRef.current = {
+            worldId: safeSaved.id,
+            revision: safeSaved.revision ?? 0,
+          };
+          setWorld(safeSaved);
+          setHasExistingSavedWorld(true);
+          setSaveMode('cloud');
+        } else if (!cloudRes.exists && !cloudRes.networkError) {
+          // Brand new Google account with no world in Supabase yet
+          const initialCloud = sanitizeWorldForFirstCloudSave(
+            createDefaultWorld('village', activeAppUser.id),
+            activeAppUser.id,
+            proActive,
+            rewardState.ok ? rewardState.unlockedAssetIds : []
+          );
+          latestCloudRevRef.current = { worldId: initialCloud.id, revision: 0 };
+          setWorld(initialCloud);
+          setSaveMode('cloud');
+
+          const saveRes = await saveWorld(initialCloud, supaUser, activeAppUser);
+          if (saveRes.success && typeof saveRes.revision === 'number') {
+            latestCloudRevRef.current = {
+              worldId: initialCloud.id,
+              revision: saveRes.revision,
+            };
+            setWorld((prev) =>
+              prev.id === initialCloud.id
+                ? {
+                    ...prev,
+                    revision: saveRes.revision,
+                    updatedAt: saveRes.updatedAt || prev.updatedAt,
+                    unlockedAssetIds: saveRes.unlockedAssetIds || prev.unlockedAssetIds,
+                  }
+                : prev
+            );
+          }
+        } else {
           setSaveMode('cloud');
         }
+
+        setDailyGiftAvailable(
+          proActive
+            ? false
+            : rewardState.ok
+            ? rewardState.remainingToday > 0
+            : true
+        );
+      } else {
+        setIsProUser(false);
+        setSaveMode('local');
+        const guestSaved = await loadWorld(null, null);
+        if (guestSaved) {
+          const { world: safeSaved } = enforceFreeLandscapeAccess(guestSaved, false);
+          setWorld(safeSaved);
+          setHasExistingSavedWorld(true);
+        }
+        const claimed = await checkDailyGiftClaimed(null, 0, undefined, false);
+        setDailyGiftAvailable(!claimed);
       }
 
+      bootDoneRef.current = true;
       setAuthHydrated(true);
-
-      // Check daily gift status
-      const claimed = await checkDailyGiftClaimed(currentUser, 0, activeAppUser?.id, proActive);
-      setDailyGiftAvailable(!claimed);
     };
 
     init();
   }, []);
 
-  // Update daily gift check and Pro status when user changes
+  // Update daily gift check and Pro status when user changes after initial boot
   useEffect(() => {
+    if (!bootDoneRef.current) return;
+
     const syncUserStatus = async () => {
       const proActive = currentUser?.provider === 'google' ? await checkProStatus() : false;
       setIsProUser(proActive);
+      if (proActive) {
+        setIsGiftModalOpen(false);
+      }
 
       if (!proActive) {
         setWorld((prevWorld) => {
@@ -168,11 +254,22 @@ export function App() {
         });
       }
 
-      const claimed = await checkDailyGiftClaimed(user, 0, currentUser?.id, proActive);
-      setDailyGiftAvailable(!claimed);
+      if (proActive) {
+        setDailyGiftAvailable(false);
+      } else {
+        const claimed = await checkDailyGiftClaimed(user, 0, currentUser?.id, false);
+        setDailyGiftAvailable(!claimed);
+      }
     };
     syncUserStatus();
   }, [user, currentUser]);
+
+  // Ensure GiftModal immediately closes if user upgrades to Pro
+  useEffect(() => {
+    if (isProUser && isGiftModalOpen) {
+      setIsGiftModalOpen(false);
+    }
+  }, [isProUser, isGiftModalOpen]);
 
   // Reactive safety guard: prevent unentitled access to Wonderworld or locked Pro placement after auth hydration
   useEffect(() => {
@@ -206,7 +303,10 @@ export function App() {
 
       const proActive = await checkProStatus();
       setIsProUser(proActive);
-      if (!proActive) {
+      if (proActive) {
+        setIsGiftModalOpen(false);
+        setDailyGiftAvailable(false);
+      } else {
         setWorld((prevWorld) => {
           const { world: safeWorld, switched } = enforceFreeLandscapeAccess(prevWorld, false);
           if (switched) {
@@ -248,23 +348,72 @@ export function App() {
     };
   }, []);
 
-  // 2. Debounced Auto-Save
-  const triggerAutoSave = useCallback((worldToSave: World) => {
-    setSaveStatus('saving');
-    if (saveTimeoutRef.current) {
-      window.clearTimeout(saveTimeoutRef.current);
-    }
-
-    saveTimeoutRef.current = window.setTimeout(async () => {
-      const res = await saveWorld(worldToSave, user, currentUser);
-      if (res.success) {
-        setSaveStatus('saved');
-        setSaveMode(res.mode);
-      } else {
-        setSaveStatus('error');
+  // 2. Debounced Auto-Save with Optimistic Concurrency Control
+  const triggerAutoSave = useCallback(
+    (worldToSave: World) => {
+      setSaveStatus('saving');
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current);
       }
-    }, 700);
-  }, [user, currentUser]);
+
+      saveTimeoutRef.current = window.setTimeout(async () => {
+        const activeUser = currentUserRef.current;
+        const knownRev =
+          latestCloudRevRef.current && latestCloudRevRef.current.worldId === worldToSave.id
+            ? latestCloudRevRef.current.revision
+            : worldToSave.revision;
+
+        const payloadWorld: World = {
+          ...worldToSave,
+          revision: typeof knownRev === 'number' ? knownRev : 0,
+        };
+
+        const res = await saveWorld(payloadWorld, user, activeUser);
+
+        // Ignore stale callback if auth session changed mid-flight
+        if ((currentUserRef.current?.id || null) !== (activeUser?.id || null)) {
+          return;
+        }
+
+        if (res.success) {
+          setSaveStatus('saved');
+          setSaveMode(res.mode);
+          if (res.mode === 'cloud' && typeof res.revision === 'number') {
+            latestCloudRevRef.current = {
+              worldId: payloadWorld.id,
+              revision: res.revision,
+            };
+            setWorld((prev) =>
+              prev.id === payloadWorld.id
+                ? {
+                    ...prev,
+                    revision: res.revision,
+                    updatedAt: res.updatedAt || prev.updatedAt,
+                    unlockedAssetIds: res.unlockedAssetIds || prev.unlockedAssetIds,
+                  }
+                : prev
+            );
+          }
+        } else if (res.conflict && res.serverWorld) {
+          const { world: safeServerWorld } = enforceFreeLandscapeAccess(
+            res.serverWorld as World,
+            isProUser
+          );
+          latestCloudRevRef.current = {
+            worldId: safeServerWorld.id,
+            revision: safeServerWorld.revision ?? 0,
+          };
+          setWorld(safeServerWorld);
+          setSaveStatus('saved');
+          setSaveMode('cloud');
+          showCloudNotice('World synced with newer edits saved from another session or device.');
+        } else {
+          setSaveStatus('error');
+        }
+      }, 700);
+    },
+    [user, isProUser, showCloudNotice]
+  );
 
   // Handle Welcome Screen actions
   const handleContinueExisting = () => {
@@ -481,16 +630,33 @@ export function App() {
     setPlacementAssetType(null);
   };
 
-  const handleGiftClaimed = (newObj: PlacedObject, assetId: string) => {
+  const handleGiftClaimed = (
+    newObj: PlacedObject,
+    assetId: string,
+    serverWorldRevision?: number,
+    serverUnlockedAssetIds?: string[]
+  ) => {
+    if (typeof serverWorldRevision === 'number') {
+      latestCloudRevRef.current = {
+        worldId: world.id,
+        revision: serverWorldRevision,
+      };
+    }
+
     setWorld((prevWorld) => {
       const existingUnlocked = prevWorld.unlockedAssetIds || [];
-      const updatedUnlocked = existingUnlocked.includes(assetId)
-        ? existingUnlocked
-        : [...existingUnlocked, assetId];
+      const updatedUnlocked =
+        serverUnlockedAssetIds && serverUnlockedAssetIds.length > 0
+          ? Array.from(new Set([...existingUnlocked, ...serverUnlockedAssetIds, assetId]))
+          : existingUnlocked.includes(assetId)
+          ? existingUnlocked
+          : [...existingUnlocked, assetId];
 
       const currentObjects = prevWorld.placedObjects || [];
       const newObjects = [...currentObjects, newObj];
-      const decs = prevWorld.landscapeDecorations || JSON.parse(JSON.stringify(DEFAULT_LANDSCAPE_DECORATIONS));
+      const decs =
+        prevWorld.landscapeDecorations ||
+        JSON.parse(JSON.stringify(DEFAULT_LANDSCAPE_DECORATIONS));
       const updatedDecorations = {
         ...decs,
         [prevWorld.landscapeType]: newObjects,
@@ -501,6 +667,10 @@ export function App() {
         placedObjects: newObjects,
         landscapeDecorations: updatedDecorations,
         unlockedAssetIds: updatedUnlocked,
+        revision:
+          typeof serverWorldRevision === 'number'
+            ? serverWorldRevision
+            : prevWorld.revision,
       };
 
       triggerAutoSave(updatedWorld);
@@ -512,6 +682,8 @@ export function App() {
       checkDailyGiftClaimed(user, 0, currentUser?.id, isProUser).then((claimed) => {
         setDailyGiftAvailable(!claimed);
       });
+    } else {
+      setDailyGiftAvailable(false);
     }
   };
 
@@ -556,9 +728,56 @@ export function App() {
 
   const handleManualSave = async () => {
     setSaveStatus('saving');
-    const res = await saveWorld(world, user, currentUser);
-    setSaveStatus(res.success ? 'saved' : 'error');
-    setSaveMode(res.mode);
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current);
+    }
+
+    const knownRev =
+      latestCloudRevRef.current && latestCloudRevRef.current.worldId === world.id
+        ? latestCloudRevRef.current.revision
+        : world.revision;
+
+    const payloadWorld: World = {
+      ...world,
+      revision: typeof knownRev === 'number' ? knownRev : 0,
+    };
+
+    const res = await saveWorld(payloadWorld, user, currentUser);
+    if (res.success) {
+      setSaveStatus('saved');
+      setSaveMode(res.mode);
+      if (res.mode === 'cloud' && typeof res.revision === 'number') {
+        latestCloudRevRef.current = {
+          worldId: payloadWorld.id,
+          revision: res.revision,
+        };
+        setWorld((prev) =>
+          prev.id === payloadWorld.id
+            ? {
+                ...prev,
+                revision: res.revision,
+                updatedAt: res.updatedAt || prev.updatedAt,
+                unlockedAssetIds: res.unlockedAssetIds || prev.unlockedAssetIds,
+              }
+            : prev
+        );
+      }
+    } else if (res.conflict && res.serverWorld) {
+      const { world: safeServerWorld } = enforceFreeLandscapeAccess(
+        res.serverWorld as World,
+        isProUser
+      );
+      latestCloudRevRef.current = {
+        worldId: safeServerWorld.id,
+        revision: safeServerWorld.revision ?? 0,
+      };
+      setWorld(safeServerWorld);
+      setSaveStatus('saved');
+      setSaveMode('cloud');
+      showCloudNotice('World synced with newer edits saved from another session or device.');
+    } else {
+      setSaveStatus('error');
+    }
   };
 
   const handleTriggerSanta = useCallback(() => {
@@ -587,6 +806,7 @@ export function App() {
   }, []);
 
   const selectedObject = world.placedObjects.find((o) => o.id === selectedObjectId) || null;
+  const showDailyGifts = authHydrated && !isProUser;
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#0d1723] select-none">
@@ -617,12 +837,17 @@ export function App() {
         saveMode={saveMode}
         onSaveWorld={handleManualSave}
         onOpenExport={() => setIsExportModalOpen(true)}
-        onOpenGifts={() => setIsGiftModalOpen(true)}
+        onOpenGifts={() => {
+          if (showDailyGifts) {
+            setIsGiftModalOpen(true);
+          }
+        }}
         onOpenAuth={() => setIsAuthModalOpen(true)}
         onResetCamera={() => canvasRef.current?.resetCamera()}
         user={user}
         currentUser={currentUser}
         dailyGiftAvailable={dailyGiftAvailable}
+        showDailyGifts={showDailyGifts}
         isProUser={isProUser}
         onTriggerSanta={handleTriggerSanta}
         onOpenProModal={() => setIsProModalOpen(true)}
@@ -636,6 +861,22 @@ export function App() {
           setIsPrivacyModalOpen(true);
         }}
       />
+
+      {/* Cloud Sync Conflict / Multi-Device Notice */}
+      {cloudNotice && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-auto max-w-md w-[90vw] sm:w-auto animate-in fade-in slide-in-from-top-3 duration-200">
+          <div className="winter-panel-gold px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2.5 border-[#e5c783]/60 bg-[#0e1c2e]/95 text-xs text-amber-100">
+            <span>☁️</span>
+            <span className="flex-1">{cloudNotice}</span>
+            <button
+              onClick={() => setCloudNotice(null)}
+              className="text-[#91a1b1] hover:text-white cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Magical Santa Animation Active Notification Banner */}
       {santaToast && (
@@ -672,6 +913,7 @@ export function App() {
         unlockedAssetIds={world.unlockedAssetIds}
         landscapeDecorations={world.landscapeDecorations}
         isProUser={isProUser}
+        showDailyGifts={showDailyGifts}
         onSelectPlacementAsset={(assetId) => {
           if (assetId && !isAssetUnlocked(assetId, world.unlockedAssetIds, isProUser)) {
             setIsProModalOpen(true);
@@ -697,7 +939,11 @@ export function App() {
         onDeleteSelected={handleDeleteSelected}
         onSwitchLandscape={handleSwitchLandscape}
         onSetCameraAngle={(angle) => canvasRef.current?.setCinematicAngle(angle)}
-        onOpenGifts={() => setIsGiftModalOpen(true)}
+        onOpenGifts={() => {
+          if (showDailyGifts) {
+            setIsGiftModalOpen(true);
+          }
+        }}
         onOpenProModal={() => setIsProModalOpen(true)}
       />
 
@@ -721,23 +967,25 @@ export function App() {
         />
       )}
 
-      {/* 5. Daily Gift Modal */}
-      <GiftModal
-        isOpen={isGiftModalOpen}
-        onClose={() => setIsGiftModalOpen(false)}
-        user={user}
-        currentUser={currentUser}
-        worldId={world.id}
-        unlockedAssetIds={world.unlockedAssetIds}
-        isProUser={isProUser}
-        onGiftClaimed={handleGiftClaimed}
-        onPlaceNow={(assetId) => {
-          setSelectedObjectId(null);
-          setIsMovingSelected(false);
-          setPlacementAssetType(assetId);
-        }}
-        onOpenProModal={() => setIsProModalOpen(true)}
-      />
+      {/* 5. Daily Gift Modal (Hidden for Pro users) */}
+      {showDailyGifts && (
+        <GiftModal
+          isOpen={isGiftModalOpen}
+          onClose={() => setIsGiftModalOpen(false)}
+          user={user}
+          currentUser={currentUser}
+          worldId={world.id}
+          unlockedAssetIds={world.unlockedAssetIds}
+          isProUser={isProUser}
+          onGiftClaimed={handleGiftClaimed}
+          onPlaceNow={(assetId) => {
+            setSelectedObjectId(null);
+            setIsMovingSelected(false);
+            setPlacementAssetType(assetId);
+          }}
+          onOpenProModal={() => setIsProModalOpen(true)}
+        />
+      )}
 
       {/* 6. Image Export Modal */}
       <ImageExportModal
@@ -755,41 +1003,120 @@ export function App() {
         currentUser={currentUser}
         isProUser={isProUser}
         onUserChanged={async (newUser) => {
+          if (saveTimeoutRef.current) {
+            window.clearTimeout(saveTimeoutRef.current);
+          }
+          currentUserRef.current = newUser;
           setCurrentUser(newUser);
-          if (newUser) {
-            let verifiedPro = false;
-            if (newUser.provider === 'google') {
-              verifiedPro = newUser.isPro !== undefined ? Boolean(newUser.isPro) : await checkProStatus();
+
+          if (newUser && newUser.provider === 'google') {
+            let verifiedPro =
+              newUser.isPro !== undefined ? Boolean(newUser.isPro) : await checkProStatus();
+
+            const [cloudRes, rewardState] = await Promise.all([
+              loadGoogleCloudWorld(newUser),
+              fetchDailyRewardsState(newUser.id),
+            ]);
+
+            if (rewardState.ok && rewardState.isPro) {
+              verifiedPro = true;
             }
             setIsProUser(verifiedPro);
+            if (verifiedPro) {
+              setIsGiftModalOpen(false);
+            }
 
-            const cloudWorld = await loadWorld(user, newUser);
-            if (cloudWorld) {
-              const { world: safeCloudWorld } = enforceFreeLandscapeAccess(cloudWorld, verifiedPro);
+            if (cloudRes.exists && cloudRes.world) {
+              // Existing Google cloud world found: load it cleanly without overwriting with Guest storage
+              const mergedUnlocked = Array.from(
+                new Set([
+                  ...DEFAULT_FREE_ASSET_IDS,
+                  ...(cloudRes.world.unlockedAssetIds || []),
+                  ...(rewardState.ok ? rewardState.unlockedAssetIds : []),
+                ])
+              );
+              const mergedWorld: World = {
+                ...cloudRes.world,
+                unlockedAssetIds: mergedUnlocked,
+              };
+              const { world: safeCloudWorld } = enforceFreeLandscapeAccess(
+                mergedWorld,
+                verifiedPro
+              );
+              latestCloudRevRef.current = {
+                worldId: safeCloudWorld.id,
+                revision: safeCloudWorld.revision ?? 0,
+              };
+              setSelectedObjectId(null);
+              setIsMovingSelected(false);
+              setPlacementAssetType(null);
               setWorld(safeCloudWorld);
               setHasExistingSavedWorld(true);
+              setSaveMode('cloud');
+              setSaveStatus('saved');
+            } else if (!cloudRes.exists && !cloudRes.networkError) {
+              // First-time Google sign-in: safely initialize first cloud world in Supabase
+              const firstCloudWorld = sanitizeWorldForFirstCloudSave(
+                world,
+                newUser.id,
+                verifiedPro,
+                rewardState.ok ? rewardState.unlockedAssetIds : []
+              );
+              latestCloudRevRef.current = { worldId: firstCloudWorld.id, revision: 0 };
+              setWorld(firstCloudWorld);
+              setSaveMode('cloud');
+              setSaveStatus('saving');
+
+              const saveRes = await saveWorld(firstCloudWorld, user, newUser);
+              if (saveRes.success && typeof saveRes.revision === 'number') {
+                latestCloudRevRef.current = {
+                  worldId: firstCloudWorld.id,
+                  revision: saveRes.revision,
+                };
+                setWorld((prev) =>
+                  prev.id === firstCloudWorld.id
+                    ? {
+                        ...prev,
+                        revision: saveRes.revision,
+                        updatedAt: saveRes.updatedAt || prev.updatedAt,
+                        unlockedAssetIds: saveRes.unlockedAssetIds || prev.unlockedAssetIds,
+                      }
+                    : prev
+                );
+                setSaveStatus('saved');
+              } else {
+                setSaveStatus('error');
+              }
             } else {
-              const { world: safeLocalWorld } = enforceFreeLandscapeAccess(world, verifiedPro);
-              setWorld(safeLocalWorld);
-              saveWorld(safeLocalWorld, user, newUser);
+              setSaveMode('cloud');
             }
-            setSaveMode('cloud');
+
+            setDailyGiftAvailable(
+              verifiedPro
+                ? false
+                : rewardState.ok
+                ? rewardState.remainingToday > 0
+                : true
+            );
           } else {
-            // Immediately revoke active-session Pro access & exit any Pro-only landscape
-            // while preserving the user's saved Wonderworld decorations intact.
+            // Logout -> Switch cleanly back to Guest Mode without touching Supabase cloud data
+            latestCloudRevRef.current = null;
             setIsProUser(false);
+            setIsGiftModalOpen(false);
             setSaveMode('local');
+            setSaveStatus('saved');
             setSelectedObjectId(null);
             setIsMovingSelected(false);
             setPlacementAssetType(null);
-            setWorld((prevWorld) => {
-              const { world: safeWorld, switched } = enforceFreeLandscapeAccess(prevWorld, false);
-              if (switched) {
-                // Only updates localStorage cache (user & newUser are null), leaving cloud data untouched
-                void saveWorld(safeWorld, null, null);
-              }
-              return safeWorld;
-            });
+
+            const guestSaved = await loadWorld(null, null);
+            const guestWorld = guestSaved || createDefaultWorld('village');
+            const { world: safeGuestWorld } = enforceFreeLandscapeAccess(guestWorld, false);
+            setWorld(safeGuestWorld);
+            setHasExistingSavedWorld(Boolean(guestSaved));
+
+            const claimed = await checkDailyGiftClaimed(null, 0, undefined, false);
+            setDailyGiftAvailable(!claimed);
           }
         }}
         onManualSync={handleManualSave}
@@ -802,7 +1129,8 @@ export function App() {
         user={currentUser}
         onProUnlocked={() => {
           setIsProUser(true);
-          setDailyGiftAvailable(true);
+          setIsGiftModalOpen(false);
+          setDailyGiftAvailable(false);
         }}
         onProRevoked={() => {
           setIsProUser(false);
@@ -812,7 +1140,7 @@ export function App() {
           setWorld((prevWorld) => {
             const { world: safeWorld, switched } = enforceFreeLandscapeAccess(prevWorld, false);
             if (switched) {
-              void saveWorld(safeWorld, user, currentUser);
+              triggerAutoSave(safeWorld);
             }
             return safeWorld;
           });

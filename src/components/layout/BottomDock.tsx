@@ -34,6 +34,7 @@ interface Props {
   unlockedAssetIds?: string[];
   landscapeDecorations?: Record<LandscapeType, PlacedObject[]>;
   isProUser?: boolean;
+  showDailyGifts?: boolean;
   onSelectPlacementAsset: (assetId: string | null) => void;
   onConfirmPlacementAtCenter?: () => void;
   onCancelPlacement: () => void;
@@ -58,6 +59,7 @@ export const BottomDock: React.FC<Props> = ({
   unlockedAssetIds,
   landscapeDecorations,
   isProUser = false,
+  showDailyGifts = false,
   onSelectPlacementAsset,
   onConfirmPlacementAtCenter,
   onCancelPlacement,
@@ -534,7 +536,9 @@ export const BottomDock: React.FC<Props> = ({
                               key={asset.id}
                               onClick={() => {
                                 soundEngine.playClick();
-                                onOpenGifts();
+                                if (showDailyGifts) {
+                                  onOpenGifts();
+                                }
                               }}
                               title="Secret Gift: Claim in Daily Gifts to unlock for your library!"
                               className="relative shrink-0 flex flex-col items-center justify-center p-2 rounded-xl transition-all cursor-pointer min-w-[76px] bg-[#0d1723]/90 border border-amber-500/30 hover:border-amber-400/60 hover:bg-[#132131] active:scale-95 group"

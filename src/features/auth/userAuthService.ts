@@ -135,41 +135,130 @@ export type GoogleUser = AppUser;
 export const getStoredGoogleUser = getStoredUser;
 export const setStoredGoogleUser = setStoredUser;
 
+export interface CloudSaveResult {
+  success: boolean;
+  mode: 'cloud' | 'local';
+  revision?: number;
+  updatedAt?: string;
+  unlockedAssetIds?: string[];
+  conflict?: boolean;
+  serverWorld?: any;
+  error?: string;
+  status?: number;
+}
+
+export interface CloudLoadResult {
+  ok: boolean;
+  exists: boolean;
+  world: any | null;
+  error?: string;
+  status?: number;
+}
+
 export async function saveWorldToCloudBackend(
   world: any,
   userId: string
-): Promise<{ success: boolean; mode: 'cloud' | 'local' }> {
+): Promise<CloudSaveResult> {
   try {
-    const res = await fetch(`/api/worlds/${userId}`, {
+    const payload = {
+      ...world,
+      revision: typeof world?.revision === 'number' ? world.revision : 0,
+    };
+
+    const res = await fetch(`/api/worlds/${encodeURIComponent(userId)}`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(world),
+      body: JSON.stringify(payload),
     });
-    if (res.ok) {
-      return { success: true, mode: 'cloud' };
+
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok && data?.success) {
+      return {
+        success: true,
+        mode: 'cloud',
+        revision: typeof data.revision === 'number' ? data.revision : undefined,
+        updatedAt: data.updatedAt,
+        unlockedAssetIds: Array.isArray(data.unlockedAssetIds)
+          ? data.unlockedAssetIds
+          : undefined,
+        status: res.status,
+      };
     }
-  } catch (err) {
-    console.warn('Could not save to cloud backend, falling back to local storage:', err);
+
+    if (res.status === 409 && (data?.conflict || data?.serverWorld)) {
+      return {
+        success: false,
+        mode: 'cloud',
+        conflict: true,
+        revision: typeof data.revision === 'number' ? data.revision : undefined,
+        updatedAt: data.updatedAt,
+        unlockedAssetIds: Array.isArray(data.unlockedAssetIds)
+          ? data.unlockedAssetIds
+          : undefined,
+        serverWorld: data.serverWorld,
+        error: data?.error || 'A newer version of this world was saved from another session.',
+        status: 409,
+      };
+    }
+
+    return {
+      success: false,
+      mode: 'cloud',
+      error: data?.error || 'Could not save world to cloud storage.',
+      status: res.status,
+    };
+  } catch (err: any) {
+    console.warn('Could not save to cloud backend:', err);
+    return {
+      success: false,
+      mode: 'cloud',
+      error: err?.message || 'Network error while saving world.',
+    };
   }
-  return { success: true, mode: 'local' };
+}
+
+export async function loadWorldFromCloudBackendResult(
+  userId: string
+): Promise<CloudLoadResult> {
+  try {
+    const res = await fetch(`/api/worlds/${encodeURIComponent(userId)}`, {
+      method: 'GET',
+      credentials: 'include',
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok && data?.success) {
+      return {
+        ok: true,
+        exists: Boolean(data.world),
+        world: data.world || null,
+        status: res.status,
+      };
+    }
+
+    return {
+      ok: false,
+      exists: false,
+      world: null,
+      error: data?.error || 'Could not load world from cloud storage.',
+      status: res.status,
+    };
+  } catch (err: any) {
+    console.warn('Could not load from cloud backend:', err);
+    return {
+      ok: false,
+      exists: false,
+      world: null,
+      error: err?.message || 'Network error while loading cloud world.',
+    };
+  }
 }
 
 export async function loadWorldFromCloudBackend(userId: string): Promise<any | null> {
-  try {
-    const res = await fetch(`/api/worlds/${userId}`, {
-      credentials: 'include',
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && data.world) {
-        return data.world;
-      }
-    }
-  } catch (err) {
-    console.warn('Could not load from cloud backend:', err);
-  }
-  return null;
+  const result = await loadWorldFromCloudBackendResult(userId);
+  return result.world;
 }
 
 /**

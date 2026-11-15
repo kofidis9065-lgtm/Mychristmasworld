@@ -2,7 +2,15 @@ import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { Gift, Sparkles, Check, X, RotateCcw, BookmarkCheck, ArrowRight, Clock, Crown, Unlock } from 'lucide-react';
 import { AssetDefinition, PlacedObject } from '../world/worldTypes';
-import { getAvailableGiftPool, checkDailyGiftClaimed, claimDailyGift, devResetDailyClaims, FREE_DAILY_GIFT_LIMIT, getTodayClaimCount } from './giftService';
+import {
+  getAvailableGiftPool,
+  checkDailyGiftClaimed,
+  claimDailyGift,
+  devResetDailyClaims,
+  fetchDailyRewardsState,
+  FREE_DAILY_GIFT_LIMIT,
+  getTodayClaimCount,
+} from './giftService';
 import { soundEngine } from '../../lib/audioSynthesis';
 import { User } from '@supabase/supabase-js';
 import { AppUser } from '../auth/userAuthService';
@@ -16,15 +24,28 @@ interface Props {
   worldId: string;
   unlockedAssetIds?: string[];
   isProUser?: boolean;
-  onGiftClaimed: (newObject: PlacedObject, assetId: string) => void;
+  onGiftClaimed: (
+    newObject: PlacedObject,
+    assetId: string,
+    serverWorldRevision?: number,
+    serverUnlockedAssetIds?: string[]
+  ) => void;
   onPlaceNow?: (assetId: string) => void;
   onOpenProModal?: () => void;
 }
 
-function getTimeUntilMidnight(): { hours: number; minutes: number; seconds: number } {
+function getTimeUntilUtcMidnight(): { hours: number; minutes: number; seconds: number } {
   const now = new Date();
-  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
-  const diffMs = Math.max(0, tomorrow.getTime() - now.getTime());
+  const nextUtcMidnightMs = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() + 1,
+    0,
+    0,
+    0,
+    0
+  );
+  const diffMs = Math.max(0, nextUtcMidnightMs - now.getTime());
   const hours = Math.floor(diffMs / (1000 * 60 * 60));
   const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
   const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
@@ -51,7 +72,7 @@ export const GiftModal: React.FC<Props> = ({
   const [claimedReward, setClaimedReward] = useState<AssetDefinition | null>(null);
   const [giftPool, setGiftPool] = useState<AssetDefinition[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState(getTimeUntilMidnight());
+  const [countdown, setCountdown] = useState(getTimeUntilUtcMidnight());
 
   // Strictly developer (kofidis9065@gmail.com) or explicit admin URL param
   const isDevAdmin =
@@ -65,10 +86,10 @@ export const GiftModal: React.FC<Props> = ({
   ).length;
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !isProUser) {
       checkStatus();
       const interval = setInterval(() => {
-        setCountdown(getTimeUntilMidnight());
+        setCountdown(getTimeUntilUtcMidnight());
       }, 1000);
       return () => clearInterval(interval);
     }
@@ -81,14 +102,34 @@ export const GiftModal: React.FC<Props> = ({
     setSelectedBoxIndex(null);
     setIsOpening(false);
 
-    const count = await getTodayClaimCount(user, 0, currentUser?.id);
-    setTodayClaims(count);
+    let effectiveUnlocked = unlockedAssetIds;
 
-    const claimed = await checkDailyGiftClaimed(user, 0, currentUser?.id, isProUser);
-    setAlreadyClaimed(claimed);
+    if (currentUser?.id && currentUser.provider === 'google') {
+      const serverState = await fetchDailyRewardsState(currentUser.id);
+      if (serverState.ok) {
+        setTodayClaims(serverState.todayCount);
+        setAlreadyClaimed(!isProUser && serverState.remainingToday <= 0);
+        if (serverState.unlockedAssetIds.length > 0) {
+          effectiveUnlocked = Array.from(
+            new Set([...unlockedAssetIds, ...serverState.unlockedAssetIds])
+          );
+        }
+      } else {
+        setTodayClaims(0);
+        setAlreadyClaimed(false);
+        if (serverState.error) {
+          setErrorMessage(serverState.error);
+        }
+      }
+    } else {
+      const count = await getTodayClaimCount(user, 0, undefined);
+      setTodayClaims(count);
+      const claimed = await checkDailyGiftClaimed(user, 0, undefined, isProUser);
+      setAlreadyClaimed(claimed);
+    }
 
     // Pick 3 random secret gifts from unrevealed pool
-    const pool = getAvailableGiftPool(unlockedAssetIds);
+    const pool = getAvailableGiftPool(effectiveUnlocked);
     const shuffled = [...pool].sort(() => 0.5 - Math.random());
     setGiftPool(shuffled.slice(0, 3));
     setLoading(false);
@@ -101,11 +142,17 @@ export const GiftModal: React.FC<Props> = ({
     setErrorMessage(null);
     soundEngine.playClick();
 
-    // Claim daily gift instantly
+    // Claim daily gift through server (Google) or isolated guest storage
     const res = await claimDailyGift(reward.id, worldId, user, 0, currentUser?.id, isProUser);
 
     if (!res.success) {
       setErrorMessage(res.error || 'Could not claim reward');
+      if (typeof res.todayCount === 'number') {
+        setTodayClaims(res.todayCount);
+        if (!isProUser && res.todayCount >= FREE_DAILY_GIFT_LIMIT) {
+          setAlreadyClaimed(true);
+        }
+      }
       setIsOpening(false);
       setSelectedBoxIndex(null);
       return;
@@ -114,7 +161,10 @@ export const GiftModal: React.FC<Props> = ({
     setClaimedReward(reward);
     setIsOpening(false);
 
-    const updatedCount = await getTodayClaimCount(user, 0, currentUser?.id);
+    const updatedCount =
+      typeof res.todayCount === 'number'
+        ? res.todayCount
+        : await getTodayClaimCount(user, 0, currentUser?.id);
     setTodayClaims(updatedCount);
     if (!isProUser && updatedCount >= FREE_DAILY_GIFT_LIMIT) {
       setAlreadyClaimed(true);
@@ -143,7 +193,7 @@ export const GiftModal: React.FC<Props> = ({
       scale: [1, 1, 1],
       createdAt: new Date().toISOString(),
     };
-    onGiftClaimed(newObj, reward.id);
+    onGiftClaimed(newObj, reward.id, res.worldRevision, res.unlockedAssetIds);
   };
 
   const handleDevReset = async () => {
@@ -159,7 +209,7 @@ export const GiftModal: React.FC<Props> = ({
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || isProUser) return null;
 
   const padZero = (n: number) => n.toString().padStart(2, '0');
 
@@ -302,7 +352,7 @@ export const GiftModal: React.FC<Props> = ({
             <div className="p-5 rounded-2xl bg-gradient-to-b from-[#16273b] to-[#0c1825] border border-[#e5c783]/40 mb-5 shadow-xl text-center">
               <div className="flex items-center justify-center gap-2 text-xs font-semibold text-[#e5c783] mb-3">
                 <Clock className="w-4 h-4 animate-spin" />
-                <span>FREE DAILY ALLOWANCE RESETS IN</span>
+                <span>FREE DAILY ALLOWANCE RESETS AT 00:00 UTC</span>
               </div>
 
               <div className="flex items-center justify-center gap-3">
