@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Sparkles, Mountain, Home, Waves, Building2, Play, ArrowRight, ShieldCheck, Download, Crown, FerrisWheel } from 'lucide-react';
 import { LandscapeType } from '../../features/world/worldTypes';
 import { soundEngine } from '../../lib/audioSynthesis';
@@ -29,6 +29,13 @@ export const WelcomeScreen: React.FC<Props> = ({
 }) => {
   const [step, setStep] = useState<'welcome' | 'chooseLandscape'>('welcome');
   const [selectedLandscape, setSelectedLandscape] = useState<LandscapeType>('village');
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0;
+    }
+  }, [step]);
 
   const landscapes: {
     id: LandscapeType;
@@ -106,12 +113,17 @@ export const WelcomeScreen: React.FC<Props> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d1723] overflow-y-auto">
+    <div
+      ref={scrollContainerRef}
+      className="fixed inset-0 z-50 overflow-y-auto overscroll-contain touch-pan-y bg-[#0d1723]"
+      style={{ WebkitOverflowScrolling: 'touch' }}
+    >
       {/* Ambient Winter Background Gradient */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1c324b] via-[#0f1b29] to-[#070d14] pointer-events-none opacity-90" />
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[#e5c783]/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1c324b] via-[#0f1b29] to-[#070d14] pointer-events-none opacity-90" />
+      <div className="fixed top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[#e5c783]/5 rounded-full blur-3xl pointer-events-none" />
 
-      <div className="relative z-10 w-full max-w-4xl text-center py-8">
+      <div className="min-h-full w-full flex flex-col items-center p-4">
+        <div className="relative z-10 w-full max-w-4xl text-center my-auto py-8">
         {step === 'welcome' ? (
           <div className="flex flex-col items-center">
             {/* Countdown Badge */}
@@ -322,6 +334,7 @@ export const WelcomeScreen: React.FC<Props> = ({
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

@@ -206,7 +206,10 @@ export async function ensurePaddleInitialized(): Promise<{ ok: boolean; error?: 
   try {
     if (env === 'sandbox') {
       window.Paddle.Environment.set('sandbox');
-    } else if (typeof window.Paddle.Environment?.set === 'function') {
+    } else if (
+      initializedEnv === 'sandbox' &&
+      typeof window.Paddle.Environment?.set === 'function'
+    ) {
       window.Paddle.Environment.set('production');
     }
 
@@ -225,14 +228,27 @@ export async function ensurePaddleInitialized(): Promise<{ ok: boolean; error?: 
             activeCheckoutCallbacks.onClose();
           }
         } else if (eventName === 'checkout.error') {
-          const msg =
+          const errorCode = String(
+            event?.error?.code ||
+              event?.data?.error?.code ||
+              event?.data?.code ||
+              event?.code ||
+              ''
+          ).trim();
+          const detail =
             event?.error?.detail ||
             event?.data?.error?.detail ||
-            event?.data?.error ||
-            'Paddle Checkout encountered an error.';
+            event?.detail ||
+            (typeof event?.data?.error === 'string' ? event.data.error : '');
+          const msg =
+            errorCode === 'transaction_checkout_not_enabled'
+              ? 'Live checkouts are not enabled on this Paddle account yet (transaction_checkout_not_enabled). Please verify Paddle Live onboarding and Checkout Settings in your Paddle Dashboard.'
+              : detail
+              ? String(detail)
+              : 'Paddle Checkout encountered an error.';
           console.error('[Paddle] Checkout event error:', event);
           if (activeCheckoutCallbacks.onError) {
-            activeCheckoutCallbacks.onError(String(msg));
+            activeCheckoutCallbacks.onError(msg);
           }
         }
       },
@@ -291,7 +307,7 @@ export async function openPaddleCheckout(options: CheckoutOptions): Promise<bool
         displayMode: 'overlay',
         theme: 'dark',
         locale: 'en',
-        successUrl: `${window.location.origin}?pro_success=true`,
+        successUrl: `${window.location.origin}/?pro_success=true`,
       },
     });
     return true;
