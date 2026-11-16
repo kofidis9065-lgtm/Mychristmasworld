@@ -188,7 +188,7 @@ export const WelcomeScreen: React.FC<Props> = ({
                 onClick={handleStartCreation}
                 className="w-full sm:w-auto flex-1 py-3.5 px-7 rounded-xl festive-gradient font-bold text-sm tracking-wide uppercase flex items-center justify-center gap-2 shadow-xl hover:brightness-105 transition-all cursor-pointer active:scale-95 font-serif-display"
               >
-                <span>Let the Christmas Begin</span>
+                <span>New Christmas World</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
