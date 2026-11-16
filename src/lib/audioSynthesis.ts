@@ -6,15 +6,52 @@ class SoundEngine {
   private ambientGain: GainNode | null = null;
   private ambientNoiseSource: AudioBufferSourceNode | null = null;
 
+  private unlockListenersBound: boolean = false;
+
+  constructor() {
+    this.bindIosAudioUnlock();
+  }
+
+  private bindIosAudioUnlock() {
+    if (typeof window === 'undefined' || this.unlockListenersBound) return;
+    this.unlockListenersBound = true;
+
+    const unlock = () => {
+      if (!this.enabled) return;
+      this.initCtx();
+      if (this.ctx && this.ctx.state === 'running') {
+        window.removeEventListener('touchend', unlock);
+        window.removeEventListener('click', unlock);
+        window.removeEventListener('keydown', unlock);
+      }
+    };
+
+    window.addEventListener('touchend', unlock, { passive: true });
+    window.addEventListener('click', unlock, { passive: true });
+    window.addEventListener('keydown', unlock, { passive: true });
+  }
+
   private initCtx() {
+    if (typeof window === 'undefined') return;
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {
-        this.ctx = new AudioCtx();
+        try {
+          this.ctx = new AudioCtx();
+        } catch {
+          return;
+        }
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      try {
+        const resumePromise = this.ctx.resume();
+        if (resumePromise && typeof resumePromise.catch === 'function') {
+          resumePromise.catch(() => {});
+        }
+      } catch {
+        // ignore Web Audio unlock restrictions until next gesture
+      }
     }
   }
 

@@ -108,7 +108,7 @@ export const PublicInfoPage: React.FC<Props> = ({ route, onNavigate }) => {
       {/* Ambient Winter Background Gradient */}
       <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1c324b] via-[#0f1b29] to-[#070d14] pointer-events-none opacity-90" />
 
-      <div className="relative z-10 min-h-full w-full max-w-3xl mx-auto px-4 py-6 sm:py-10 flex flex-col">
+      <div className="relative z-10 min-h-full w-full max-w-3xl mx-auto safe-screen-pad flex flex-col">
         {/* Top Brand & Return Bar */}
         <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <a

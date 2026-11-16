@@ -5,6 +5,7 @@ import { PlacedObject, LandscapeType, TimeOfDay } from '../features/world/worldT
 import { createSnowTerrain } from './SnowTerrain';
 import { generateLandscape } from './landscapes/landscapeGenerators';
 import { createAssetObject } from './assets/proceduralModels';
+import { disposeObjectTree } from './assets/modelMaterials';
 import { SkyAndLighting } from './SkyAndLighting';
 import { SnowfallSystem } from './Snowfall';
 import { soundEngine } from '../lib/audioSynthesis';
@@ -59,6 +60,9 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
   const selectionIndicatorRef = useRef<THREE.Group | null>(null);
   const placementCursorRef = useRef<THREE.Group | null>(null);
 
+  const [webglError, setWebglError] = useState<string | null>(null);
+  const [contextLost, setContextLost] = useState<boolean>(false);
+
   // State refs for event listeners
   const placementAssetTypeRef = useRef(placementAssetType);
   placementAssetTypeRef.current = placementAssetType;
@@ -68,6 +72,8 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
   selectedObjectIdRef.current = selectedObjectId;
   const placedObjectsRef = useRef(placedObjects);
   placedObjectsRef.current = placedObjects;
+  const timeOfDayRef = useRef(timeOfDay);
+  timeOfDayRef.current = timeOfDay;
   const draggedPosRef = useRef<{ id: string; pos: [number, number] } | null>(null);
 
   // Callback refs to prevent stale closure bugs in pointer handlers
@@ -139,6 +145,11 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
     const container = mountRef.current;
     if (!container) return;
 
+    const isIOSDevice =
+      typeof navigator !== 'undefined' &&
+      (/iphone|ipad|ipod/i.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
     // 1. Detect software WebGL guard
     const isSoftwareGl = (() => {
       try {
@@ -155,18 +166,28 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
     })();
 
     // 2. WebGLRenderer
-    const renderer = new THREE.WebGLRenderer({
-      antialias: !isSoftwareGl,
-      powerPreference: 'high-performance',
-      preserveDrawingBuffer: true, // Needed for PNG canvas export!
-    });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: !isSoftwareGl,
+        powerPreference: 'high-performance',
+        preserveDrawingBuffer: true, // Needed for PNG canvas export!
+      });
+    } catch (err) {
+      console.error('[WorldCanvas] WebGL initialization failed:', err);
+      setWebglError('3D graphics could not start on this browser. Please reload the page or enable WebGL.');
+      return;
+    }
+
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.1;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 2));
     renderer.shadowMap.enabled = !isSoftwareGl;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.setSize(container.clientWidth, container.clientHeight);
+    const initW = Math.max(1, container.clientWidth);
+    const initH = Math.max(1, container.clientHeight);
+    renderer.setSize(initW, initH);
 
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
@@ -175,12 +196,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(
-      45,
-      container.clientWidth / container.clientHeight,
-      0.5,
-      200
-    );
+    const camera = new THREE.PerspectiveCamera(45, initW / initH, 0.5, 200);
     camera.position.set(0, 16, 26);
     cameraRef.current = camera;
 
@@ -195,7 +211,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
     controlsRef.current = controls;
 
     // 5. Sky, Lighting & RoomEnvironment
-    const sky = new SkyAndLighting(scene, renderer, isSoftwareGl);
+    const sky = new SkyAndLighting(scene, renderer, isSoftwareGl, isIOSDevice);
     skyRef.current = sky;
 
     // 6. Base Snowy Terrain
@@ -236,6 +252,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
       transparent: true,
       opacity: 0.85,
     });
+    ringMat.userData.isDisposableMaterial = true;
     const ringMesh = new THREE.Mesh(ringGeo, ringMat);
     ringMesh.position.y = 0.04;
     selGroup.add(ringMesh);
@@ -264,6 +281,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
       transparent: true,
       opacity: 0.85,
     });
+    cursorMat.userData.isDisposableMaterial = true;
     const cursorRing = new THREE.Mesh(cursorRingGeo, cursorMat);
     cursorRing.position.y = 0.05;
     cursorGroup.add(cursorRing);
@@ -277,14 +295,18 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
     scene.add(cursorGroup);
     placementCursorRef.current = cursorGroup;
 
-    // Animation & Render Loop
-    let clock = new THREE.Clock();
+    // Animation & Render Loop (pauses cleanly when backgrounded or WebGL context is lost)
+    const clock = new THREE.Clock();
     let frameId = 0;
     let isDisposed = false;
+    let isContextLost = false;
 
     const tick = () => {
-      if (isDisposed) return;
-      const delta = clock.getDelta();
+      if (isDisposed || isContextLost || document.hidden) {
+        frameId = 0;
+        return;
+      }
+      const delta = Math.min(clock.getDelta(), 0.1);
 
       if (controls.enabled) {
         controls.update();
@@ -332,33 +354,131 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
       frameId = requestAnimationFrame(tick);
     };
 
-    frameId = requestAnimationFrame(tick);
+    const startLoop = () => {
+      if (isDisposed || isContextLost || document.hidden) return;
+      if (frameId === 0) {
+        clock.getDelta();
+        frameId = requestAnimationFrame(tick);
+      }
+    };
 
-    // Window Resize Handler
+    startLoop();
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (frameId !== 0) {
+          cancelAnimationFrame(frameId);
+          frameId = 0;
+        }
+      } else {
+        startLoop();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Window & Container Resize Handler (handles iOS Safari toolbar collapse & rotation)
     const handleResize = () => {
       if (!container || !renderer || !camera) return;
       const width = container.clientWidth;
       const height = container.clientHeight;
+      if (width <= 0 || height <= 0) return;
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
+      renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 2));
       renderer.setSize(width, height);
     };
     window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
 
-    // Pointer Events for Placement, Precision Dragging, & Selection
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(handleResize);
+      resizeObserver.observe(container);
+    }
+
+    // WebGL Context Loss & Restore Recovery (critical for iOS Safari memory pressure)
+    const dom = renderer.domElement;
+    const handleContextLost = (e: Event) => {
+      e.preventDefault();
+      isContextLost = true;
+      setContextLost(true);
+      if (frameId !== 0) {
+        cancelAnimationFrame(frameId);
+        frameId = 0;
+      }
+    };
+    const handleContextRestored = () => {
+      isContextLost = false;
+      setContextLost(false);
+      handleResize();
+      startLoop();
+    };
+    dom.addEventListener('webglcontextlost', handleContextLost);
+    dom.addEventListener('webglcontextrestored', handleContextRestored);
+
+    // Pointer Events for Placement, Precision Dragging, Selection & iOS Multi-Touch Arbitration
+    const activePointers = new Map<number, { x: number; y: number }>();
+    let primaryPointerId: number | null = null;
     let pointerDownPos = { x: 0, y: 0 };
     let pointerDownTime = 0;
     let candidateObjectId: string | null = null;
     let isDraggingSelectedMesh = false;
     let draggedObjectId: string | null = null;
 
+    const resetDraggedMeshPreviewPosition = (objectId: string | null) => {
+      if (!objectId || !placedObjectsGroupRef.current) return;
+      const committed = placedObjectsRef.current.find((o) => o.id === objectId);
+      const mesh = placedObjectsGroupRef.current.children.find(
+        (c) => c.userData.placedId === objectId
+      );
+      if (committed && mesh) {
+        mesh.position.set(committed.position[0] || 0, committed.position[1] || 0, committed.position[2] || 0);
+        if (selectionIndicatorRef.current) {
+          selectionIndicatorRef.current.position.set(committed.position[0] || 0, 0.02, committed.position[2] || 0);
+        }
+      }
+    };
+
+    const restoreOrbitControls = () => {
+      if (controlsRef.current) {
+        const allowOrbit = !placementAssetTypeRef.current && !isMovingSelectedRef.current;
+        controlsRef.current.enabled = allowOrbit;
+        controlsRef.current.enableRotate = allowOrbit;
+        controlsRef.current.enableZoom = allowOrbit;
+        controlsRef.current.enablePan = allowOrbit;
+        controlsRef.current.update();
+      }
+    };
+
     const updateMouseCoords = (clientX: number, clientY: number) => {
-      const rect = renderer.domElement.getBoundingClientRect();
+      const rect = dom.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
       mouse.current.x = ((clientX - rect.left) / rect.width) * 2 - 1;
       mouse.current.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     };
 
     const handlePointerDown = (e: PointerEvent) => {
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      // Multi-touch gesture started (e.g. 2-finger pinch zoom or pan on iPhone):
+      // Abort single-finger selection/drag cleanly so OrbitControls handles zoom/pan unblocked.
+      if (activePointers.size > 1) {
+        if (isDraggingSelectedMesh && draggedObjectId) {
+          resetDraggedMeshPreviewPosition(draggedObjectId);
+        }
+        primaryPointerId = null;
+        isDraggingSelectedMesh = false;
+        draggedObjectId = null;
+        draggedPosRef.current = null;
+        candidateObjectId = null;
+        if (cursorGroup && !placementAssetTypeRef.current && !isMovingSelectedRef.current) {
+          cursorGroup.visible = false;
+        }
+        restoreOrbitControls();
+        return;
+      }
+
+      primaryPointerId = e.pointerId;
       pointerDownPos = { x: e.clientX, y: e.clientY };
       pointerDownTime = performance.now();
       isDraggingSelectedMesh = false;
@@ -403,6 +523,14 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
     };
 
     const handlePointerMove = (e: PointerEvent) => {
+      if (activePointers.has(e.pointerId)) {
+        activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      }
+
+      // Ignore move events while a multi-touch pinch/pan gesture is active or from secondary pointers
+      if (activePointers.size > 1) return;
+      if (primaryPointerId !== null && e.pointerId !== primaryPointerId) return;
+
       updateMouseCoords(e.clientX, e.clientY);
 
       const dx = Math.abs(e.clientX - pointerDownPos.x);
@@ -410,7 +538,13 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
       const moveDist = Math.hypot(dx, dy);
 
       // Activate drag mode if user moves pointer beyond 6px over a candidate object
-      if (!isDraggingSelectedMesh && candidateObjectId && moveDist > 6 && !placementAssetTypeRef.current) {
+      if (
+        primaryPointerId !== null &&
+        !isDraggingSelectedMesh &&
+        candidateObjectId &&
+        moveDist > 6 &&
+        !placementAssetTypeRef.current
+      ) {
         isDraggingSelectedMesh = true;
         draggedObjectId = candidateObjectId;
         controls.enabled = false;
@@ -468,6 +602,18 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
     };
 
     const handlePointerUp = (e: PointerEvent) => {
+      activePointers.delete(e.pointerId);
+
+      // If multi-touch cancelled primary interaction, wait until all fingers lift and restore controls
+      if (primaryPointerId !== e.pointerId) {
+        if (activePointers.size === 0) {
+          restoreOrbitControls();
+        }
+        return;
+      }
+
+      primaryPointerId = null;
+
       updateMouseCoords(e.clientX, e.clientY);
       raycaster.current.setFromCamera(mouse.current, camera);
 
@@ -489,14 +635,10 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
         draggedObjectId = null;
         draggedPosRef.current = null;
         candidateObjectId = null;
-
-        if (controlsRef.current) {
-          controlsRef.current.enabled = !placementAssetTypeRef.current && !isMovingSelectedRef.current;
-          controlsRef.current.enableRotate = true;
-          controlsRef.current.enableZoom = true;
-          controlsRef.current.enablePan = true;
-          controlsRef.current.update();
+        if (cursorGroup && !placementAssetTypeRef.current && !isMovingSelectedRef.current) {
+          cursorGroup.visible = false;
         }
+        restoreOrbitControls();
         return;
       }
 
@@ -551,46 +693,72 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
       draggedPosRef.current = null;
 
       // Always restore 360 Orbit Controls
-      if (controlsRef.current) {
-        controlsRef.current.enabled = !placementAssetTypeRef.current && !isMovingSelectedRef.current;
-        controlsRef.current.enableRotate = true;
-        controlsRef.current.enableZoom = true;
-        controlsRef.current.enablePan = true;
-        controlsRef.current.update();
-      }
+      restoreOrbitControls();
     };
 
-    const handlePointerCancel = () => {
+    const handlePointerCancel = (e?: PointerEvent) => {
+      if (e) {
+        activePointers.delete(e.pointerId);
+      } else {
+        activePointers.clear();
+      }
+      if (isDraggingSelectedMesh && draggedObjectId) {
+        resetDraggedMeshPreviewPosition(draggedObjectId);
+      }
+      primaryPointerId = null;
       isDraggingSelectedMesh = false;
       draggedObjectId = null;
       draggedPosRef.current = null;
       candidateObjectId = null;
-      if (controlsRef.current) {
-        controlsRef.current.enabled = !placementAssetTypeRef.current && !isMovingSelectedRef.current;
-        controlsRef.current.enableRotate = true;
-        controlsRef.current.update();
+      if (cursorGroup && !placementAssetTypeRef.current && !isMovingSelectedRef.current) {
+        cursorGroup.visible = false;
       }
+      restoreOrbitControls();
     };
 
-    const dom = renderer.domElement;
+    const handleWindowBlur = () => {
+      activePointers.clear();
+      handlePointerCancel();
+    };
+
     dom.addEventListener('pointerdown', handlePointerDown);
     dom.addEventListener('pointermove', handlePointerMove);
     dom.addEventListener('pointerup', handlePointerUp);
     dom.addEventListener('pointercancel', handlePointerCancel);
+    dom.addEventListener('lostpointercapture', handlePointerCancel);
+    window.addEventListener('blur', handleWindowBlur);
 
     return () => {
       isDisposed = true;
-      cancelAnimationFrame(frameId);
+      if (frameId !== 0) {
+        cancelAnimationFrame(frameId);
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+      window.removeEventListener('blur', handleWindowBlur);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+      dom.removeEventListener('webglcontextlost', handleContextLost);
+      dom.removeEventListener('webglcontextrestored', handleContextRestored);
       dom.removeEventListener('pointerdown', handlePointerDown);
       dom.removeEventListener('pointermove', handlePointerMove);
       dom.removeEventListener('pointerup', handlePointerUp);
       dom.removeEventListener('pointercancel', handlePointerCancel);
+      dom.removeEventListener('lostpointercapture', handlePointerCancel);
+
+      disposeObjectTree(baseTerrain);
+      disposeObjectTree(landscapeGroup);
+      disposeObjectTree(placedGroup);
+      disposeObjectTree(selGroup);
+      disposeObjectTree(cursorGroup);
 
       controls.dispose();
       sky.dispose();
       snowfall.dispose();
       santaSystem.dispose();
+      renderer.renderLists.dispose();
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
@@ -619,10 +787,11 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
     const parent = landscapeGroupRef.current;
     if (!parent) return;
 
-    // Clear old landscape
+    // Clear & dispose old landscape GPU geometries
     while (parent.children.length > 0) {
       const child = parent.children[0];
       parent.remove(child);
+      disposeObjectTree(child);
     }
 
     // Generate selected landscape
@@ -645,9 +814,11 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
     const parent = placedObjectsGroupRef.current;
     if (!parent) return;
 
-    // Clear old meshes
+    // Clear & dispose old meshes
     while (parent.children.length > 0) {
-      parent.remove(parent.children[0]);
+      const child = parent.children[0];
+      parent.remove(child);
+      disposeObjectTree(child);
     }
 
     // Rebuild placed objects from state
@@ -665,9 +836,9 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
       parent.add(meshGroup);
     });
 
-    // Update lights immediately for night/day
-    skyRef.current?.updateSceneLightEmitters(timeOfDay);
-  }, [placedObjects, timeOfDay]);
+    // Update lights immediately for night/day without rebuilding geometries on timeOfDay change
+    skyRef.current?.updateSceneLightEmitters(timeOfDayRef.current);
+  }, [placedObjects]);
 
   // Update Selection Indicator position
   useEffect(() => {
@@ -706,9 +877,11 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
     const ghostContainer = cursor.getObjectByName('GhostContainer');
     if (!ghostContainer) return;
 
-    // Clear old ghost
+    // Clear & dispose old ghost
     while (ghostContainer.children.length > 0) {
-      ghostContainer.remove(ghostContainer.children[0]);
+      const child = ghostContainer.children[0];
+      ghostContainer.remove(child);
+      disposeObjectTree(child);
     }
 
     if (placementAssetType) {
@@ -718,6 +891,7 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
           const mat = child.material.clone() as THREE.MeshStandardMaterial;
           mat.transparent = true;
           mat.opacity = 0.65;
+          mat.userData.isDisposableMaterial = true;
           child.material = mat;
         }
       });
@@ -735,8 +909,21 @@ export const WorldCanvas = forwardRef<WorldCanvasHandle, Props>(({
   return (
     <div
       ref={mountRef}
-      className="relative w-full h-full overflow-hidden cursor-grab active:cursor-grabbing"
-      style={{ touchAction: 'none' }}
-    />
+      className="relative w-full h-full overflow-hidden cursor-grab active:cursor-grabbing canvas-touch-lock"
+    >
+      {(webglError || contextLost) && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center p-6 bg-[#0d1723]/95 text-center">
+          <div className="max-w-sm rounded-2xl winter-panel-gold p-5 text-xs text-[#edf2f6] space-y-2">
+            <div className="text-base font-bold font-serif-display text-[#e5c783]">
+              {webglError ? '3D Graphics Unavailable' : 'Restoring 3D Scene...'}
+            </div>
+            <p className="text-[#91a1b1] leading-relaxed">
+              {webglError ||
+                'Your browser paused 3D graphics to free memory. Returning to the scene automatically.'}
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 });

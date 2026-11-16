@@ -69,13 +69,19 @@ export function App() {
 
   const canvasRef = useRef<WorldCanvasHandle | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
+  const pendingSaveWorldRef = useRef<World | null>(null);
   const bootDoneRef = useRef<boolean>(false);
   const latestCloudRevRef = useRef<{ worldId: string; revision: number } | null>(null);
   const currentUserRef = useRef<AppUser | null>(currentUser);
+  const userRef = useRef<User | null>(user);
 
   useEffect(() => {
     currentUserRef.current = currentUser;
   }, [currentUser]);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   const showCloudNotice = useCallback((message: string) => {
     setCloudNotice(message);
@@ -84,8 +90,12 @@ export function App() {
     }, 5500);
   }, []);
 
+  const proReturnPollTimerRef = useRef<number | null>(null);
+
   // 1. Initialize Auth, Pro Status, and Load Existing World
   useEffect(() => {
+    let isCancelled = false;
+
     const init = async () => {
       let supaUser: User | null = null;
       if (isSupabaseConfigured && supabase) {
@@ -117,6 +127,7 @@ export function App() {
 
       // Restore verified Google session & authoritative Pro entitlement from server HttpOnly cookie
       const serverSession = await fetchServerAuthSession();
+      if (isCancelled) return;
       const activeAppUser =
         serverSession.authenticated && serverSession.user ? serverSession.user : null;
 
@@ -127,7 +138,9 @@ export function App() {
       let proActive = activeAppUser?.provider === 'google' ? serverSession.isPro : false;
 
       // Handle Paddle Checkout redirect return (?pro_success=true)
-      if (typeof window !== 'undefined' && window.location.search.includes('pro_success=true')) {
+      const returnedFromProCheckout =
+        typeof window !== 'undefined' && window.location.search.includes('pro_success=true');
+      if (returnedFromProCheckout) {
         const refreshedPro = activeAppUser?.provider === 'google' ? await checkProStatus() : false;
         if (refreshedPro) {
           proActive = true;
@@ -135,6 +148,28 @@ export function App() {
         const url = new URL(window.location.href);
         url.searchParams.delete('pro_success');
         window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+
+        // Retry shortly in case iOS Safari redirected back before Paddle webhook completed
+        if (!proActive && activeAppUser?.provider === 'google' && !isCancelled) {
+          let attempts = 0;
+          const scheduleRetry = () => {
+            if (isCancelled || attempts >= 3) return;
+            attempts += 1;
+            proReturnPollTimerRef.current = window.setTimeout(async () => {
+              if (isCancelled) return;
+              const active = await checkProStatus();
+              if (isCancelled) return;
+              if (active) {
+                setIsProUser(true);
+                setIsGiftModalOpen(false);
+                setDailyGiftAvailable(false);
+              } else {
+                scheduleRetry();
+              }
+            }, 2000);
+          };
+          scheduleRetry();
+        }
       }
 
       if (activeAppUser && activeAppUser.provider === 'google') {
@@ -229,6 +264,12 @@ export function App() {
     };
 
     init();
+    return () => {
+      isCancelled = true;
+      if (proReturnPollTimerRef.current) {
+        window.clearTimeout(proReturnPollTimerRef.current);
+      }
+    };
   }, []);
 
   // Update daily gift check and Pro status when user changes after initial boot
@@ -325,26 +366,26 @@ export function App() {
     };
   }, [currentUser]);
 
-  // Autoplay vintage Christmas music on first user gesture
+  // Autoplay vintage Christmas music on first user gesture (touchend/click/keydown required on iOS Safari)
   useEffect(() => {
     const startAudioOnGesture = () => {
       const state = youtubeAudio.getState();
       if (!state.isMuted && !state.isPlaying) {
         youtubeAudio.play();
       }
-      window.removeEventListener('pointerdown', startAudioOnGesture);
+      window.removeEventListener('touchend', startAudioOnGesture);
+      window.removeEventListener('click', startAudioOnGesture);
       window.removeEventListener('keydown', startAudioOnGesture);
-      window.removeEventListener('touchstart', startAudioOnGesture);
     };
 
-    window.addEventListener('pointerdown', startAudioOnGesture, { once: true });
-    window.addEventListener('keydown', startAudioOnGesture, { once: true });
-    window.addEventListener('touchstart', startAudioOnGesture, { once: true });
+    window.addEventListener('touchend', startAudioOnGesture, { once: true, passive: true });
+    window.addEventListener('click', startAudioOnGesture, { once: true, passive: true });
+    window.addEventListener('keydown', startAudioOnGesture, { once: true, passive: true });
 
     return () => {
-      window.removeEventListener('pointerdown', startAudioOnGesture);
+      window.removeEventListener('touchend', startAudioOnGesture);
+      window.removeEventListener('click', startAudioOnGesture);
       window.removeEventListener('keydown', startAudioOnGesture);
-      window.removeEventListener('touchstart', startAudioOnGesture);
     };
   }, []);
 
@@ -352,11 +393,13 @@ export function App() {
   const triggerAutoSave = useCallback(
     (worldToSave: World) => {
       setSaveStatus('saving');
+      pendingSaveWorldRef.current = worldToSave;
       if (saveTimeoutRef.current) {
         window.clearTimeout(saveTimeoutRef.current);
       }
 
       saveTimeoutRef.current = window.setTimeout(async () => {
+        pendingSaveWorldRef.current = null;
         const activeUser = currentUserRef.current;
         const knownRev =
           latestCloudRevRef.current && latestCloudRevRef.current.worldId === worldToSave.id
@@ -414,6 +457,49 @@ export function App() {
     },
     [user, isProUser, showCloudNotice]
   );
+
+  // Flush pending unsaved changes immediately when iOS Safari backgrounds or closes the tab
+  useEffect(() => {
+    const flushPendingSave = () => {
+      const pending = pendingSaveWorldRef.current;
+      if (!pending) return;
+
+      pendingSaveWorldRef.current = null;
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+
+      const activeUser = currentUserRef.current;
+      const knownRev =
+        latestCloudRevRef.current && latestCloudRevRef.current.worldId === pending.id
+          ? latestCloudRevRef.current.revision
+          : pending.revision;
+
+      const payloadWorld: World = {
+        ...pending,
+        revision: typeof knownRev === 'number' ? knownRev : 0,
+      };
+
+      void saveWorld(payloadWorld, userRef.current, activeUser, { keepalive: true });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushPendingSave();
+      }
+    };
+
+    window.addEventListener('pagehide', flushPendingSave);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', flushPendingSave);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Handle Welcome Screen actions
   const handleContinueExisting = () => {
@@ -728,8 +814,10 @@ export function App() {
 
   const handleManualSave = async () => {
     setSaveStatus('saving');
+    pendingSaveWorldRef.current = null;
     if (saveTimeoutRef.current) {
       window.clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
     }
 
     const knownRev =
@@ -809,7 +897,7 @@ export function App() {
   const showDailyGifts = authHydrated && !isProUser;
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-[#0d1723] select-none">
+    <div className="relative app-viewport overflow-hidden bg-[#0d1723] select-none">
       {/* 1. Main 3D Interactive World Viewport */}
       <WorldCanvas
         ref={canvasRef}
@@ -864,7 +952,7 @@ export function App() {
 
       {/* Cloud Sync Conflict / Multi-Device Notice */}
       {cloudNotice && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-auto max-w-md w-[90vw] sm:w-auto animate-in fade-in slide-in-from-top-3 duration-200">
+        <div className="fixed safe-top-cloud left-1/2 -translate-x-1/2 z-50 pointer-events-auto max-w-md w-[90vw] sm:w-auto animate-in fade-in slide-in-from-top-3 duration-200">
           <div className="winter-panel-gold px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2.5 border-[#e5c783]/60 bg-[#0e1c2e]/95 text-xs text-amber-100">
             <span>☁️</span>
             <span className="flex-1">{cloudNotice}</span>
@@ -880,7 +968,7 @@ export function App() {
 
       {/* Magical Santa Animation Active Notification Banner */}
       {santaToast && (
-        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 pointer-events-auto max-w-lg w-[92vw] sm:w-auto animate-in fade-in slide-in-from-top-4 duration-300">
+        <div className="fixed safe-top-toast left-1/2 -translate-x-1/2 z-50 pointer-events-auto max-w-lg w-[92vw] sm:w-auto animate-in fade-in slide-in-from-top-4 duration-300">
           <div className="winter-panel-gold px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border-[#e5c783]/60 bg-[#0e1c2e]/95 backdrop-blur-md">
             <span className="text-2xl sm:text-3xl animate-bounce">
               {santaToast.type === 'sky' ? '🛷' : '🏮'}
@@ -1003,8 +1091,10 @@ export function App() {
         currentUser={currentUser}
         isProUser={isProUser}
         onUserChanged={async (newUser) => {
+          pendingSaveWorldRef.current = null;
           if (saveTimeoutRef.current) {
             window.clearTimeout(saveTimeoutRef.current);
+            saveTimeoutRef.current = null;
           }
           currentUserRef.current = newUser;
           setCurrentUser(newUser);

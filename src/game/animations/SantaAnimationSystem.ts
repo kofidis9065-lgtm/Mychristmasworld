@@ -419,7 +419,27 @@ export class SantaAnimationSystem {
   }
 
   public dispose() {
-    this.stardustGeo.dispose();
+    const disposedGeos = new Set<THREE.BufferGeometry>();
+    const disposedMats = new Set<THREE.Material>();
+    this.group.traverse((child) => {
+      if (
+        child instanceof THREE.Mesh ||
+        child instanceof THREE.Line ||
+        child instanceof THREE.Points
+      ) {
+        if (child.geometry && !disposedGeos.has(child.geometry)) {
+          disposedGeos.add(child.geometry);
+          child.geometry.dispose();
+        }
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        mats.forEach((mat) => {
+          if (mat && !disposedMats.has(mat)) {
+            disposedMats.add(mat);
+            mat.dispose();
+          }
+        });
+      }
+    });
     this.scene.remove(this.group);
   }
 }

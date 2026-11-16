@@ -55,6 +55,16 @@ const materials = {
     roughness: 0.9,
     metalness: 0.05,
   }),
+  wonderworldRail: new THREE.MeshStandardMaterial({
+    color: 0xe5c783,
+    roughness: 0.2,
+    metalness: 0.85,
+  }),
+  wonderworldTrack: new THREE.MeshStandardMaterial({
+    color: 0xd93838,
+    roughness: 0.4,
+    metalness: 0.6,
+  }),
 };
 
 function enableShadows(obj: THREE.Object3D) {
@@ -476,12 +486,7 @@ export function generateWonderworldLandscape(): THREE.Group {
   // Gold Guard Railing around Ice Rink
   const railGeo = new THREE.TorusGeometry(8.6, 0.08, 8, 32);
   railGeo.rotateX(Math.PI / 2);
-  const railMat = new THREE.MeshStandardMaterial({
-    color: 0xe5c783,
-    roughness: 0.2,
-    metalness: 0.85,
-  });
-  const rail = new THREE.Mesh(railGeo, railMat);
+  const rail = new THREE.Mesh(railGeo, materials.wonderworldRail);
   rail.position.set(0, 0.35, 0);
   group.add(rail);
 
@@ -501,11 +506,6 @@ export function generateWonderworldLandscape(): THREE.Group {
   group.add(path2);
 
   // Background Fairground Coaster Track Arches
-  const trackMat = new THREE.MeshStandardMaterial({
-    color: 0xd93838,
-    roughness: 0.4,
-    metalness: 0.6,
-  });
   const archRadius = 16;
   for (let i = 0; i < 8; i++) {
     const angle = (i / 8) * Math.PI * 2;
@@ -515,7 +515,7 @@ export function generateWonderworldLandscape(): THREE.Group {
     const z = Math.sin(angle) * archRadius;
 
     const pillarGeo = new THREE.CylinderGeometry(0.2, 0.25, 8, 8);
-    const pillar = new THREE.Mesh(pillarGeo, trackMat);
+    const pillar = new THREE.Mesh(pillarGeo, materials.wonderworldTrack);
     pillar.position.set(x, 4, z);
     group.add(pillar);
 

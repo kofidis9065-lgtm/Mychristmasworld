@@ -418,7 +418,8 @@ export async function loadGoogleCloudWorld(
 export async function saveWorld(
   world: World,
   _user: any | null,
-  appUser?: AppUser | null
+  appUser?: AppUser | null,
+  options?: { keepalive?: boolean }
 ): Promise<CloudSaveResult> {
   try {
     const updatedWorld: World = {
@@ -431,7 +432,8 @@ export async function saveWorld(
     if (appUser && appUser.provider === 'google') {
       const res = await saveWorldToCloudBackend(
         { ...updatedWorld, ownerUserId: appUser.id },
-        appUser.id
+        appUser.id,
+        options
       );
 
       if (res.success) {

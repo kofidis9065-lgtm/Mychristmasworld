@@ -57,20 +57,20 @@ class YouTubeAudioService {
   private init() {
     if (typeof window === 'undefined') return;
 
-    // Listen for first interaction to satisfy autoplay policies
+    // Listen for first valid iOS Safari user activation to satisfy autoplay policies
     const handleFirstGesture = () => {
       this.hasInteracted = true;
       if (!this.isMuted && !this.isPlaying) {
         this.play();
       }
-      window.removeEventListener('pointerdown', handleFirstGesture);
+      window.removeEventListener('touchend', handleFirstGesture);
+      window.removeEventListener('click', handleFirstGesture);
       window.removeEventListener('keydown', handleFirstGesture);
-      window.removeEventListener('touchstart', handleFirstGesture);
     };
 
-    window.addEventListener('pointerdown', handleFirstGesture, { once: true });
-    window.addEventListener('keydown', handleFirstGesture, { once: true });
-    window.addEventListener('touchstart', handleFirstGesture, { once: true });
+    window.addEventListener('touchend', handleFirstGesture, { once: true, passive: true });
+    window.addEventListener('click', handleFirstGesture, { once: true, passive: true });
+    window.addEventListener('keydown', handleFirstGesture, { once: true, passive: true });
 
     // Load YouTube IFrame API script
     this.loadYouTubeApi();
@@ -145,7 +145,8 @@ class YouTubeAudioService {
             this.isReady = true;
             try {
               event.target.setVolume(85);
-              if (!this.isMuted) {
+              if (!this.isMuted && this.hasInteracted) {
+                this.stopFallbackAudio();
                 event.target.playVideo();
                 this.isPlaying = true;
               }
@@ -157,10 +158,13 @@ class YouTubeAudioService {
           onStateChange: (event: any) => {
             // YT.PlayerState: 1 = PLAYING, 2 = PAUSED, 0 = ENDED, 3 = BUFFERING
             if (event.data === 1) {
+              this.stopFallbackAudio();
               this.isPlaying = true;
               this.isUsingFallback = false;
             } else if (event.data === 2) {
-              this.isPlaying = false;
+              if (!this.isUsingFallback) {
+                this.isPlaying = false;
+              }
             } else if (event.data === 0) {
               // Loop back to beginning of vintage holiday playlist
               this.player?.playVideo();
@@ -179,6 +183,17 @@ class YouTubeAudioService {
     }
   }
 
+  private stopFallbackAudio() {
+    this.isUsingFallback = false;
+    if (this.fallbackAudio) {
+      try {
+        this.fallbackAudio.pause();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   private activateAudioFallback() {
     this.isUsingFallback = true;
     if (!this.fallbackAudio) {
@@ -186,9 +201,11 @@ class YouTubeAudioService {
         'https://ia801309.us.archive.org/34/items/JingleBells_659/JingleBells.mp3'
       );
       this.fallbackAudio.loop = true;
+      this.fallbackAudio.preload = 'none';
       this.fallbackAudio.volume = 0.5;
     }
     if (!this.isMuted) {
+      this.fallbackAudio.muted = false;
       this.fallbackAudio.play().then(() => {
         this.isPlaying = true;
         this.notify();
@@ -209,6 +226,7 @@ class YouTubeAudioService {
 
     if (this.player && typeof this.player.playVideo === 'function') {
       try {
+        this.stopFallbackAudio();
         this.player.unMute();
         this.player.playVideo();
         this.isPlaying = true;

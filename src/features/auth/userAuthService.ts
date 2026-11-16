@@ -157,19 +157,23 @@ export interface CloudLoadResult {
 
 export async function saveWorldToCloudBackend(
   world: any,
-  userId: string
+  userId: string,
+  options?: { keepalive?: boolean }
 ): Promise<CloudSaveResult> {
   try {
     const payload = {
       ...world,
       revision: typeof world?.revision === 'number' ? world.revision : 0,
     };
+    const serialized = JSON.stringify(payload);
+    const useKeepalive = Boolean(options?.keepalive) && serialized.length < 60000;
 
     const res = await fetch(`/api/worlds/${encodeURIComponent(userId)}`, {
       method: 'POST',
       credentials: 'include',
+      keepalive: useKeepalive,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: serialized,
     });
 
     const data = await res.json().catch(() => ({}));

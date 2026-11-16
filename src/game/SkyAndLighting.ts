@@ -10,7 +10,12 @@ export class SkyAndLighting {
   private pmremGenerator: THREE.PMREMGenerator | null = null;
   private envMapTexture: THREE.Texture | null = null;
 
-  constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer, isSoftwareGl: boolean) {
+  constructor(
+    scene: THREE.Scene,
+    renderer: THREE.WebGLRenderer,
+    isSoftwareGl: boolean,
+    isCompactMemory: boolean = false
+  ) {
     this.scene = scene;
 
     // Studio Environment reflection using RoomEnvironment
@@ -24,11 +29,12 @@ export class SkyAndLighting {
     }
 
     // Directional Key Light (Winter Sun or Moon)
+    const shadowRes = isSoftwareGl ? 512 : isCompactMemory ? 1024 : 2048;
     this.dirLight = new THREE.DirectionalLight(0xfff1d6, 1.8);
     this.dirLight.position.set(22, 28, 18);
     this.dirLight.castShadow = !isSoftwareGl;
-    this.dirLight.shadow.mapSize.width = isSoftwareGl ? 512 : 2048;
-    this.dirLight.shadow.mapSize.height = isSoftwareGl ? 512 : 2048;
+    this.dirLight.shadow.mapSize.width = shadowRes;
+    this.dirLight.shadow.mapSize.height = shadowRes;
     this.dirLight.shadow.camera.near = 1;
     this.dirLight.shadow.camera.far = 80;
 
@@ -151,6 +157,10 @@ export class SkyAndLighting {
   }
 
   public dispose() {
+    if (this.dirLight.shadow?.map) {
+      this.dirLight.shadow.map.dispose();
+      this.dirLight.shadow.map = null;
+    }
     if (this.envMapTexture) {
       this.envMapTexture.dispose();
       this.envMapTexture = null;

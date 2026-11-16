@@ -135,16 +135,16 @@ export const BottomDock: React.FC<Props> = ({
     }
   };
 
-  // Handle PC Mouse Click & Drag horizontal sliding
+  // Handle PC Mouse Click & Drag horizontal sliding (skip touch/pen so iOS native momentum scrolling works)
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (!catalogScrollRef.current) return;
+    if (e.pointerType !== 'mouse' || !catalogScrollRef.current) return;
     isPointerDownRef.current = true;
     startXRef.current = e.clientX - catalogScrollRef.current.offsetLeft;
     scrollLeftStartRef.current = catalogScrollRef.current.scrollLeft;
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isPointerDownRef.current || !catalogScrollRef.current) return;
+    if (e.pointerType !== 'mouse' || !isPointerDownRef.current || !catalogScrollRef.current) return;
     const x = e.clientX - catalogScrollRef.current.offsetLeft;
     const walk = (x - startXRef.current) * 1.5;
     catalogScrollRef.current.scrollLeft = scrollLeftStartRef.current - walk;
@@ -157,7 +157,7 @@ export const BottomDock: React.FC<Props> = ({
   return (
     <aside
       aria-label="World building controls"
-      className="fixed bottom-3 left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl px-2 sm:px-3 pointer-events-none transition-all duration-300 select-none"
+      className="fixed safe-bottom-dock left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl pointer-events-none transition-all duration-300 select-none"
     >
       <div className="flex flex-col items-center">
         {/* Collapse / Expand Toggle Button */}

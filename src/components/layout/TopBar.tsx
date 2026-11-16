@@ -97,12 +97,12 @@ export const TopBar: React.FC<Props> = ({
   };
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-40 pointer-events-none p-2 sm:p-3">
+    <header className="fixed top-0 left-0 right-0 z-40 pointer-events-none safe-topbar">
       <div className="max-w-7xl mx-auto flex flex-col gap-2">
         {/* Main Bar */}
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-1.5 sm:gap-2 min-w-0">
           {/* 1. Left: 3D Animated Santa Face Icon & Pro Badge */}
-          <div className="pointer-events-auto flex items-center gap-2">
+          <div className="pointer-events-auto flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               type="button"
               className="p-1 rounded-2xl winter-panel shadow-xl border-[#e5c783]/40 hover:scale-110 active:scale-95 transition-all cursor-pointer relative group focus:outline-none focus:ring-2 focus:ring-amber-400/50"
@@ -151,7 +151,7 @@ export const TopBar: React.FC<Props> = ({
           </div>
 
           {/* 2. Right: Action Buttons */}
-          <div className="pointer-events-auto flex items-center gap-1.5 sm:gap-2">
+          <div className="pointer-events-auto flex items-center gap-1 sm:gap-2 min-w-0">
             {/* PWA App Install Button */}
             {onOpenPWAInstall && (
               <button
@@ -159,7 +159,7 @@ export const TopBar: React.FC<Props> = ({
                   soundEngine.playClick();
                   onOpenPWAInstall();
                 }}
-                className="flex items-center gap-1.5 py-1.5 px-2.5 sm:px-3 rounded-xl text-xs font-semibold bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/80 border border-emerald-500/40 transition-all cursor-pointer shadow-lg active:scale-95"
+                className="flex items-center gap-1 sm:gap-1.5 py-1.5 px-2 sm:px-3 rounded-xl text-xs font-semibold bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/80 border border-emerald-500/40 transition-all cursor-pointer shadow-lg active:scale-95 shrink-0"
                 title="Install App in 1 Click on Android & iOS"
               >
                 <Download className="w-3.5 h-3.5 text-emerald-400 animate-bounce" />
@@ -176,7 +176,7 @@ export const TopBar: React.FC<Props> = ({
                   ? 'Unmute Christmas Music (40s-60s Classics)'
                   : `Playing: Vintage Christmas Classics (Click to Mute)`
               }
-              className={`flex items-center gap-1.5 py-1.5 px-2.5 sm:px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-lg active:scale-95 ${
+              className={`flex items-center gap-1 sm:gap-1.5 py-1.5 px-2 sm:px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-lg active:scale-95 shrink-0 ${
                 !musicState.isMuted && musicState.isPlaying
                   ? 'festive-gradient'
                   : 'winter-panel text-[#91a1b1] hover:text-white border-white/10'
@@ -204,7 +204,7 @@ export const TopBar: React.FC<Props> = ({
                   soundEngine.playClick();
                   onOpenGifts();
                 }}
-                className="relative festive-gradient flex items-center gap-1.5 py-1.5 px-2.5 sm:px-3 rounded-xl font-bold text-xs uppercase tracking-wider font-serif-display cursor-pointer"
+                className="relative festive-gradient flex items-center gap-1 sm:gap-1.5 py-1.5 px-2 sm:px-3 rounded-xl font-bold text-xs uppercase tracking-wider font-serif-display cursor-pointer shrink-0"
               >
                 <Gift className={`w-3.5 h-3.5 ${dailyGiftAvailable ? 'animate-bounce' : ''}`} />
                 <span className="hidden sm:inline">
@@ -425,7 +425,7 @@ export const TopBar: React.FC<Props> = ({
 
         {/* Mobile Menu Panel */}
         {mobileMenuOpen && (
-          <div className="mobile-only-control flex-col max-h-[80vh] overflow-y-auto pointer-events-auto winter-panel-gold rounded-2xl p-3.5 shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200 border-[#e5c783]/50">
+          <div className="mobile-only-control flex-col max-h-[75vh] max-h-[75dvh] overflow-y-auto overscroll-contain pointer-events-auto winter-panel-gold rounded-2xl p-3.5 shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200 border-[#e5c783]/50">
             <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/10">
               <span className="text-xs font-bold uppercase tracking-wider text-white font-serif-display">
                 World Controls

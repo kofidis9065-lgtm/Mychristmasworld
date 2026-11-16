@@ -337,6 +337,9 @@ function bakeMergedGroup(sourceGroup: THREE.Group): THREE.Group {
   const baked = new THREE.Group();
   buckets.forEach(({ geos, noCast }, mat) => {
     const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+    if (geos.length > 1) {
+      geos.forEach((g) => g.dispose());
+    }
     if (merged) {
       const mesh = new THREE.Mesh(merged, mat);
       if (noCast) mesh.userData.noCastShadow = true;
@@ -344,6 +347,45 @@ function bakeMergedGroup(sourceGroup: THREE.Group): THREE.Group {
     }
   });
   return baked;
+}
+
+const sharedMaterialSet = new Set<THREE.Material>(Object.values(materials));
+
+/**
+ * Safely disposes uniquely allocated BufferGeometries and explicitly disposable
+ * Materials within a Three.js subtree, while preserving module-level shared
+ * cached geometries and shared material singletons.
+ */
+export function disposeObjectTree(root: THREE.Object3D): void {
+  const disposedGeos = new Set<THREE.BufferGeometry>();
+  const disposedMats = new Set<THREE.Material>();
+
+  root.traverse((child) => {
+    if (
+      child instanceof THREE.Mesh ||
+      child instanceof THREE.Line ||
+      child instanceof THREE.Points
+    ) {
+      const geo = child.geometry;
+      if (geo && !geo.userData?.isSharedCachedGeometry && !disposedGeos.has(geo)) {
+        disposedGeos.add(geo);
+        geo.dispose();
+      }
+
+      const mats = Array.isArray(child.material) ? child.material : [child.material];
+      mats.forEach((mat) => {
+        if (
+          mat &&
+          !sharedMaterialSet.has(mat) &&
+          mat.userData?.isDisposableMaterial &&
+          !disposedMats.has(mat)
+        ) {
+          disposedMats.add(mat);
+          mat.dispose();
+        }
+      });
+    }
+  });
 }
 
 // Lightweight geometry cache for repeated rounded boxes
@@ -391,6 +433,7 @@ export function getRoundedBoxGeo(
   });
   geo.rotateX(Math.PI / 2);
   geo.center();
+  geo.userData.isSharedCachedGeometry = true;
   roundedBoxCache.set(key, geo);
   return geo;
 }

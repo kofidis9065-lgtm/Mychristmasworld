@@ -5,6 +5,18 @@ import { soundEngine } from '../../lib/audioSynthesis';
 const AI_PROMPT =
   'Transform this scene into a magical, cinematic, realistic 3D world. Preserve the original landscape, objects and composition. Enhance lighting, textures and details.';
 
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, base64] = dataUrl.split(',');
+  const mimeMatch = /data:([^;]+);/i.exec(header || '');
+  const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+  const binary = atob(base64 || '');
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mimeType });
+}
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -40,15 +52,65 @@ export const ImageExportModal: React.FC<Props> = ({
     setCopied(false);
   };
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (!previewUrl) return;
     setIsExporting(true);
     soundEngine.playClick();
 
-    const link = document.createElement('a');
-    link.download = `my-christmas-world-${aspectRatio}-${Date.now()}.png`;
-    link.href = previewUrl;
-    link.click();
+    const filename = `my-christmas-world-${aspectRatio}-${Date.now()}.png`;
+    let sharedViaSheet = false;
+
+    try {
+      const blob = dataUrlToBlob(previewUrl);
+      const isIOS =
+        typeof navigator !== 'undefined' &&
+        (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+      const isStandalone =
+        typeof window !== 'undefined' &&
+        ((window.navigator as any).standalone === true ||
+          window.matchMedia?.('(display-mode: standalone)')?.matches === true);
+
+      // In iOS Home Screen standalone PWA mode, <a download> is ignored by WebKit; use Share sheet
+      if (isIOS && isStandalone && typeof navigator.share === 'function' && typeof File !== 'undefined') {
+        const file = new File([blob], filename, { type: 'image/png' });
+        if (navigator.canShare?.({ files: [file] })) {
+          try {
+            await navigator.share({
+              files: [file],
+              title: 'My Christmas World',
+            });
+            sharedViaSheet = true;
+          } catch (shareErr: any) {
+            if (shareErr?.name === 'AbortError') {
+              setIsExporting(false);
+              return;
+            }
+          }
+        }
+      }
+
+      if (!sharedViaSheet) {
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.download = filename;
+        link.href = objectUrl;
+        link.rel = 'noopener';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.setTimeout(() => {
+          URL.revokeObjectURL(objectUrl);
+        }, 10000);
+      }
+    } catch {
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = previewUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
 
     setTimeout(() => {
       setIsExporting(false);
@@ -78,6 +140,7 @@ export const ImageExportModal: React.FC<Props> = ({
         textarea.style.left = '-9999px';
         document.body.appendChild(textarea);
         textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
         success = document.execCommand('copy');
         document.body.removeChild(textarea);
       } catch {

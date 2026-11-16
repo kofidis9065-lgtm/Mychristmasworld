@@ -11,8 +11,10 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
+        includeAssets: ['favicon.svg', 'pwa-icon.svg', 'apple-touch-icon.png'],
         workbox: {
           maximumFileSizeToCacheInBytes: 6000000,
+          navigateFallbackDenylist: [/^\/api\//],
         },
         manifest: {
           name: 'My Christmas World',

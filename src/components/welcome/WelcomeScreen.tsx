@@ -122,7 +122,7 @@ export const WelcomeScreen: React.FC<Props> = ({
       <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1c324b] via-[#0f1b29] to-[#070d14] pointer-events-none opacity-90" />
       <div className="fixed top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[#e5c783]/5 rounded-full blur-3xl pointer-events-none" />
 
-      <div className="min-h-full w-full flex flex-col items-center p-4">
+      <div className="min-h-full w-full flex flex-col items-center safe-screen-pad">
         <div className="relative z-10 w-full max-w-4xl text-center my-auto py-8">
         {step === 'welcome' ? (
           <div className="flex flex-col items-center">

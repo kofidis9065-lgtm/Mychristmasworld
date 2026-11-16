@@ -1,7 +1,8 @@
-const CACHE_NAME = 'my-xmas-world-v2';
+const CACHE_NAME = 'my-xmas-world-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
+  '/apple-touch-icon.png',
   '/pwa-icon.svg',
   '/favicon.svg',
   '/manifest.json'
@@ -30,9 +31,14 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Network first, falling back to cache
+  // Never intercept non-GET, cross-origin, or API requests
   if (event.request.method !== 'GET') return;
-  
+
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.origin !== self.location.origin || requestUrl.pathname.startsWith('/api/')) {
+    return;
+  }
+
   event.respondWith(
     fetch(event.request)
       .then((response) => {
@@ -44,8 +50,9 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       })
-      .catch(() => {
-        return caches.match(event.request);
+      .catch(async () => {
+        const cached = await caches.match(event.request);
+        return cached || Response.error();
       })
   );
 });

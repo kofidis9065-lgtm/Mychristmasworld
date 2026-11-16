@@ -46,17 +46,49 @@ export const PWAInstallModal: React.FC<Props> = ({
     }
   };
 
-  const handleCopyUrl = () => {
+  const handleCopyUrl = async () => {
     soundEngine.playClick();
-    const appUrl = typeof window !== 'undefined' ? window.location.origin || 'https://myxmas.top' : 'https://myxmas.top';
-    navigator.clipboard.writeText(appUrl);
-    setCopiedUrl(true);
-    setTimeout(() => setCopiedUrl(false), 3000);
+    const appUrl =
+      typeof window !== 'undefined'
+        ? window.location.origin || 'https://myxmas.top'
+        : 'https://myxmas.top';
+    let success = false;
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(appUrl);
+        success = true;
+      }
+    } catch {
+      success = false;
+    }
+
+    if (!success) {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = appUrl;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+        success = document.execCommand('copy');
+        document.body.removeChild(textarea);
+      } catch {
+        success = false;
+      }
+    }
+
+    if (success) {
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 3000);
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-xs select-none animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg rounded-2xl winter-panel-gold p-5 sm:p-6 text-[#edf2f6] shadow-2xl border border-[#e5c783]/60 text-center">
+      <div className="relative w-full max-w-lg max-h-[90vh] max-h-[90dvh] overflow-y-auto overscroll-contain rounded-2xl winter-panel-gold p-5 sm:p-6 text-[#edf2f6] shadow-2xl border border-[#e5c783]/60 text-center">
         {/* Close Button */}
         <button
           onClick={onClose}

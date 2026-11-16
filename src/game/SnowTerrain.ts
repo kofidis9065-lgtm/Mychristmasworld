@@ -15,6 +15,7 @@ export function createSnowTerrain(): THREE.Group {
     roughness: 0.94,
     metalness: 0.02,
   });
+  snowMaterial.userData.isDisposableMaterial = true;
 
   const groundMesh = new THREE.Mesh(terrainGeo, snowMaterial);
   groundMesh.position.y = -0.6;
@@ -31,6 +32,7 @@ export function createSnowTerrain(): THREE.Group {
     opacity: 0.5,
     depthWrite: false,
   });
+  shadowMat.userData.isDisposableMaterial = true;
   const shadowMesh = new THREE.Mesh(shadowPlaneGeo, shadowMat);
   shadowMesh.position.y = -1.22;
   terrainGroup.add(shadowMesh);

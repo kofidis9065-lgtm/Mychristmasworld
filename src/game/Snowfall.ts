@@ -91,7 +91,11 @@ export class SnowfallSystem {
   public dispose() {
     if (this.points) {
       this.points.geometry.dispose();
-      (this.points.material as THREE.Material).dispose();
+      const mat = this.points.material as THREE.PointsMaterial;
+      if (mat.map) {
+        mat.map.dispose();
+      }
+      mat.dispose();
       this.points = null;
     }
   }

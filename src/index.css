@@ -22,7 +22,64 @@ body {
   font-family: 'Outfit', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   overflow: hidden;
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
   -webkit-font-smoothing: antialiased;
+}
+
+.app-viewport {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.canvas-touch-lock {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.safe-topbar {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
+  padding-left: calc(env(safe-area-inset-left, 0px) + 0.5rem);
+  padding-right: calc(env(safe-area-inset-right, 0px) + 0.5rem);
+}
+
+@media (min-width: 640px) {
+  .safe-topbar {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 0.75rem);
+    padding-left: calc(env(safe-area-inset-left, 0px) + 0.75rem);
+    padding-right: calc(env(safe-area-inset-right, 0px) + 0.75rem);
+  }
+}
+
+.safe-bottom-dock {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+  padding-left: calc(env(safe-area-inset-left, 0px) + 0.5rem);
+  padding-right: calc(env(safe-area-inset-right, 0px) + 0.5rem);
+}
+
+@media (min-width: 640px) {
+  .safe-bottom-dock {
+    padding-left: calc(env(safe-area-inset-left, 0px) + 0.75rem);
+    padding-right: calc(env(safe-area-inset-right, 0px) + 0.75rem);
+  }
+}
+
+.safe-top-toast {
+  top: calc(env(safe-area-inset-top, 0px) + 4rem);
+}
+
+.safe-top-cloud {
+  top: calc(env(safe-area-inset-top, 0px) + 5rem);
+}
+
+.safe-screen-pad {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
+  padding-left: calc(env(safe-area-inset-left, 0px) + 1rem);
+  padding-right: calc(env(safe-area-inset-right, 0px) + 1rem);
 }
 
 .font-serif-display {

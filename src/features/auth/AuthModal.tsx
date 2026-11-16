@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppUser, logoutUser, loginWithGoogleCredential } from './userAuthService';
 import { X, User as UserIcon, Check, ShieldCheck, RefreshCw, LogOut, Crown, Compass } from 'lucide-react';
 import { soundEngine } from '../../lib/audioSynthesis';
@@ -23,6 +23,8 @@ export const AuthModal: React.FC<Props> = ({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [showFallbackButton, setShowFallbackButton] = useState(false);
+  const googleButtonRef = useRef<HTMLDivElement | null>(null);
   const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim();
   const isAuthenticated = Boolean(currentUser && currentUser.provider === 'google');
 
@@ -66,8 +68,31 @@ export const AuthModal: React.FC<Props> = ({
     if (isOpen) {
       setErrorMsg(null);
       setSuccessMsg(null);
+      setShowFallbackButton(false);
     }
   }, [isOpen]);
+
+  // Render Google's official button fallback when One Tap is blocked (e.g., iOS Safari ITP / standalone PWA)
+  useEffect(() => {
+    if (!isOpen || isAuthenticated || !googleClientId || !showFallbackButton) return;
+    const gsi = typeof window !== 'undefined' ? (window as any).google?.accounts?.id : null;
+    if (!gsi || !googleButtonRef.current) return;
+
+    try {
+      googleButtonRef.current.innerHTML = '';
+      gsi.renderButton(googleButtonRef.current, {
+        type: 'standard',
+        theme: 'outline',
+        size: 'large',
+        text: 'continue_with',
+        shape: 'rectangular',
+        logo_alignment: 'left',
+        width: Math.min(360, googleButtonRef.current.offsetWidth || 320),
+      });
+    } catch (err) {
+      console.warn('Google renderButton fallback error:', err);
+    }
+  }, [isOpen, isAuthenticated, googleClientId, showFallbackButton]);
 
   const handleContinueWithGoogle = () => {
     soundEngine.playClick();
@@ -81,14 +106,32 @@ export const AuthModal: React.FC<Props> = ({
 
     if (typeof window !== 'undefined' && (window as any).google?.accounts?.id) {
       try {
-        (window as any).google.accounts.id.initialize({
+        const gsi = (window as any).google.accounts.id;
+        gsi.initialize({
           client_id: googleClientId,
           locale: 'en',
           callback: handleGoogleCallback,
         });
-        (window as any).google.accounts.id.prompt();
+        gsi.prompt((notification: any) => {
+          if (notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.()) {
+            setShowFallbackButton(true);
+            const isStandaloneIOS =
+              (window.navigator as any).standalone === true &&
+              /iPad|iPhone|iPod/.test(navigator.userAgent);
+            if (isStandaloneIOS) {
+              setErrorMsg(
+                'Use the Google Sign-In button below, or open myxmas.top in Safari if the Home Screen app blocks sign-in popups.'
+              );
+            } else {
+              setErrorMsg(
+                'Quick prompt was dismissed by your browser. Tap the official Google Sign-In button below.'
+              );
+            }
+          }
+        });
       } catch (err: any) {
         console.error('Google Sign-In error:', err);
+        setShowFallbackButton(true);
         setErrorMsg(err?.message || 'Error starting Google Sign-In. Please try again.');
       }
     } else {
@@ -238,6 +281,12 @@ export const AuthModal: React.FC<Props> = ({
               </svg>
               <span>{loading ? 'Signing in...' : 'Continue with Google'}</span>
             </button>
+
+            {showFallbackButton && (
+              <div className="w-full flex justify-center pt-1">
+                <div ref={googleButtonRef} className="w-full flex justify-center min-h-[44px]" />
+              </div>
+            )}
 
             <button
               type="button"
