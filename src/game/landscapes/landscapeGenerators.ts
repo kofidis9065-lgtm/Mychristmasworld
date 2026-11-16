@@ -18,6 +18,11 @@ const materials = {
     roughness: 0.95,
     metalness: 0.1,
   }),
+  mountainPeak: new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.93,
+    metalness: 0.04,
+  }),
   frozenIce: new THREE.MeshStandardMaterial({
     color: 0x78b8e0,
     roughness: 0.15,
@@ -133,41 +138,110 @@ export function generateVillageLandscape(): THREE.Group {
   return group;
 }
 
+function createNaturalMountainGeometry(
+  radius: number,
+  height: number,
+  seed: number,
+  leanX: number,
+  leanZ: number
+): THREE.BufferGeometry {
+  const geo = new THREE.ConeGeometry(radius, height, 16, 6, true);
+  const posAttr = geo.attributes.position as THREE.BufferAttribute;
+  const count = posAttr.count;
+  const colors = new Float32Array(count * 3);
+
+  const rockDark = new THREE.Color(0x434d5e);
+  const rockMid = new THREE.Color(0x5b687c);
+  const snowCol = new THREE.Color(0xf0f6fc);
+  const tmpColor = new THREE.Color();
+
+  for (let i = 0; i < count; i++) {
+    const vx = posAttr.getX(i);
+    const vy = posAttr.getY(i);
+    const vz = posAttr.getZ(i);
+
+    const t = THREE.MathUtils.clamp((vy + height / 2) / height, 0, 1);
+    const origR = Math.hypot(vx, vz);
+    const theta = Math.atan2(vz, vx);
+
+    // Soften summit profile and embed base slightly into ground
+    const softT = t > 0.82 ? t - (t - 0.82) * 0.32 : t;
+    const leanFactor = Math.pow(t, 1.15);
+
+    if (origR > 1e-4) {
+      const shoulderProfile = 1 + 0.22 * Math.sin(t * Math.PI) * (1 - t * 0.35);
+      const radialNoise =
+        1 +
+        0.2 * Math.sin(theta * 2 + seed) +
+        0.13 * Math.cos(theta * 3 - seed * 1.4 + t * 2.0) +
+        0.07 * Math.sin(theta * 5 + seed * 0.6);
+
+      const newR = origR * shoulderProfile * radialNoise;
+      const ridgeHeightOffset =
+        height *
+        0.08 *
+        Math.sin(t * Math.PI) *
+        (0.6 * Math.sin(theta * 2 + seed * 1.1) + 0.4 * Math.cos(theta * 3 - seed * 0.7));
+
+      const newX = Math.cos(theta) * newR + leanX * leanFactor;
+      const newZ = Math.sin(theta) * newR + leanZ * leanFactor;
+      const newY = (softT - 0.5) * height + ridgeHeightOffset - (t < 0.02 ? 0.15 : 0);
+
+      posAttr.setXYZ(i, newX, newY, newZ);
+    } else {
+      // Watertight apex vertex
+      posAttr.setXYZ(i, leanX, (softT - 0.5) * height, leanZ);
+    }
+
+    // Natural undulating alpine snowline + snowy foothills
+    const snowLine =
+      0.53 +
+      0.11 * Math.sin(theta * 3 + seed * 1.3) +
+      0.07 * Math.cos(theta * 2 - seed * 0.9);
+    const upperSnow = THREE.MathUtils.smoothstep(t, snowLine - 0.15, snowLine + 0.08);
+    const baseSnow = 1 - THREE.MathUtils.smoothstep(t, 0.02, 0.22);
+    const snowFactor = Math.max(upperSnow, baseSnow * 0.85);
+    const rockMix = 0.5 + 0.5 * Math.sin(theta * 2 + seed + t * 2.0);
+
+    tmpColor.copy(rockDark).lerp(rockMid, rockMix).lerp(snowCol, snowFactor);
+    colors[i * 3] = tmpColor.r;
+    colors[i * 3 + 1] = tmpColor.g;
+    colors[i * 3 + 2] = tmpColor.b;
+  }
+
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  posAttr.needsUpdate = true;
+  geo.computeVertexNormals();
+  return geo;
+}
+
 // 2. Mountain Landscape
 export function generateMountainLandscape(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'Landscape_Mountain';
 
-  // Towering Alpine Peaks in background
+  // Scenic Alpine Peaks in background (softer irregular shapes, moderate height)
   const peakConfigs = [
     // Back ridge
-    { pos: [-18, 0, -22], r: 10, h: 22 },
-    { pos: [-6, 0, -24], r: 12, h: 26 },
-    { pos: [8, 0, -23], r: 11, h: 24 },
-    { pos: [20, 0, -21], r: 9, h: 19 },
+    { pos: [-18, 0, -22], r: 10.5, h: 14.5, seed: 1.2, leanX: 1.4, leanZ: -0.8 },
+    { pos: [-6, 0, -24], r: 12.5, h: 17.5, seed: 2.7, leanX: -1.6, leanZ: 0.9 },
+    { pos: [8, 0, -23], r: 11.5, h: 16.0, seed: 4.1, leanX: 1.2, leanZ: 0.7 },
+    { pos: [20, 0, -21], r: 9.8, h: 13.0, seed: 5.5, leanX: -1.1, leanZ: -0.6 },
     // Left ridge
-    { pos: [-24, 0, -8], r: 10, h: 18 },
-    { pos: [-23, 0, 6], r: 11, h: 20 },
-    { pos: [-22, 0, 18], r: 9, h: 16 },
+    { pos: [-24, 0, -8], r: 10.5, h: 12.5, seed: 3.3, leanX: -0.9, leanZ: 1.3 },
+    { pos: [-23, 0, 6], r: 11.2, h: 13.8, seed: 6.2, leanX: 0.8, leanZ: -1.2 },
+    { pos: [-22, 0, 18], r: 9.5, h: 11.0, seed: 0.9, leanX: -0.7, leanZ: -1.0 },
     // Right ridge
-    { pos: [23, 0, -6], r: 10, h: 19 },
-    { pos: [24, 0, 8], r: 11, h: 21 },
-    { pos: [21, 0, 18], r: 9, h: 17 },
+    { pos: [23, 0, -6], r: 10.5, h: 13.0, seed: 4.8, leanX: 0.9, leanZ: 1.1 },
+    { pos: [24, 0, 8], r: 11.2, h: 14.2, seed: 1.9, leanX: -1.0, leanZ: -1.3 },
+    { pos: [21, 0, 18], r: 9.5, h: 11.5, seed: 7.1, leanX: 0.8, leanZ: -0.9 },
   ];
 
   peakConfigs.forEach((p) => {
-    // Rocky peak
-    const coneGeo = new THREE.ConeGeometry(p.r, p.h, 7);
-    coneGeo.rotateY(Math.random() * Math.PI);
-    const rock = new THREE.Mesh(coneGeo, materials.mountainRock);
-    rock.position.set(p.pos[0], p.h / 2, p.pos[2]);
-    group.add(rock);
-
-    // Snow capped top
-    const snowCapGeo = new THREE.ConeGeometry(p.r * 0.45, p.h * 0.45, 7);
-    const snowCap = new THREE.Mesh(snowCapGeo, materials.snowGround);
-    snowCap.position.set(p.pos[0], p.h * 0.78, p.pos[2]);
-    group.add(snowCap);
+    const mountainGeo = createNaturalMountainGeometry(p.r, p.h, p.seed, p.leanX, p.leanZ);
+    const mountain = new THREE.Mesh(mountainGeo, materials.mountainPeak);
+    mountain.position.set(p.pos[0], p.h / 2, p.pos[2]);
+    group.add(mountain);
   });
 
   // Alpine Shelf Pine Clusters
@@ -465,19 +539,6 @@ export function generateWonderworldLandscape(): THREE.Group {
     tree.position.set(x, y, z);
     tree.scale.set(1.1, 1.2, 1.1);
     group.add(tree);
-  });
-
-  // Perimeter Street Lamps
-  const lampPositions = [
-    [-6, 0, -9], [6, 0, -9],
-    [-9, 0, -6], [9, 0, -6],
-    [-9, 0, 6], [9, 0, 6],
-    [-6, 0, 9], [6, 0, 9],
-  ];
-  lampPositions.forEach(([x, y, z]) => {
-    const lamp = createStreetLamp();
-    lamp.position.set(x, y, z);
-    group.add(lamp);
   });
 
   createPerimeterSnowbanks(group);
