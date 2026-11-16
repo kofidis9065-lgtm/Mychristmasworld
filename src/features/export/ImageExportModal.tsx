@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
-import { Camera, Download, X, Check, Image as ImageIcon } from 'lucide-react';
+import { Camera, Download, X, Check, Image as ImageIcon, Sparkles, Copy } from 'lucide-react';
 import { soundEngine } from '../../lib/audioSynthesis';
+
+const AI_PROMPT =
+  'Transform this scene into a magical, cinematic, realistic 3D world. Preserve the original landscape, objects and composition. Enhance lighting, textures and details.';
 
 interface Props {
   isOpen: boolean;
@@ -17,6 +20,7 @@ export const ImageExportModal: React.FC<Props> = ({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [downloadSuccess, setDownloadSuccess] = useState<boolean>(false);
+  const [copied, setCopied] = useState<boolean>(false);
 
   // Generate preview when opening or changing ratio
   React.useEffect(() => {
@@ -25,6 +29,7 @@ export const ImageExportModal: React.FC<Props> = ({
     } else {
       setPreviewUrl(null);
       setDownloadSuccess(false);
+      setCopied(false);
     }
   }, [isOpen, aspectRatio]);
 
@@ -32,6 +37,7 @@ export const ImageExportModal: React.FC<Props> = ({
     const dataUrl = getCanvasDataUrl(ratio);
     setPreviewUrl(dataUrl);
     setDownloadSuccess(false);
+    setCopied(false);
   };
 
   const handleDownload = () => {
@@ -50,22 +56,136 @@ export const ImageExportModal: React.FC<Props> = ({
     }, 400);
   };
 
+  const handleCopyPrompt = async () => {
+    soundEngine.playClick();
+    let success = false;
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(AI_PROMPT);
+        success = true;
+      }
+    } catch {
+      success = false;
+    }
+
+    if (!success) {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = AI_PROMPT;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        success = document.execCommand('copy');
+        document.body.removeChild(textarea);
+      } catch {
+        success = false;
+      }
+    }
+
+    if (success) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2500);
+    }
+  };
+
   if (!isOpen) return null;
 
+  if (downloadSuccess) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-xs select-none animate-in fade-in duration-200">
+        <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl winter-panel-gold p-5 sm:p-6 text-[#edf2f6] shadow-2xl border border-[#e5c783]/60">
+          {/* Close Button */}
+          <button
+            onClick={() => {
+              soundEngine.playClick();
+              onClose();
+            }}
+            aria-label="Close"
+            className="absolute top-3.5 right-3.5 p-1.5 rounded-lg text-[#91a1b1] hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+
+          {/* Header */}
+          <div className="flex items-center gap-3 mb-4 pr-8">
+            <div className="p-2.5 sm:p-3 rounded-2xl festive-gradient text-white shadow-xl shrink-0">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <div>
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-300 mb-0.5">
+                <Check className="w-3.5 h-3.5" />
+                <span>PNG screenshot saved</span>
+              </span>
+              <h2 className="text-lg sm:text-xl font-extrabold font-serif-display text-white tracking-wide gold-glow">
+                ✨ Bring Your World to Life!
+              </h2>
+            </div>
+          </div>
+
+          {/* Instruction */}
+          <p className="text-xs sm:text-sm text-[#cfdbe5] leading-relaxed mb-3">
+            Upload your screenshot to any AI image tool and use this prompt:
+          </p>
+
+          {/* Prompt Box */}
+          <div className="p-3.5 sm:p-4 mb-5 rounded-xl bg-black/40 border border-[#e5c783]/35 text-xs sm:text-sm text-[#edf2f6] leading-relaxed select-text">
+            {AI_PROMPT}
+          </div>
+
+          {/* Actions */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            <button
+              onClick={handleCopyPrompt}
+              className={`flex-1 py-2.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                copied
+                  ? 'bg-emerald-600 text-white border border-emerald-400/50'
+                  : 'festive-gradient text-white hover:brightness-110'
+              }`}
+            >
+              {copied ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4" />
+                  <span>Copy AI Prompt</span>
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => {
+                soundEngine.playClick();
+                onClose();
+              }}
+              className="py-2.5 px-5 rounded-xl border border-white/20 text-[#edf2f6] text-xs font-semibold hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-      <div className="relative w-full max-w-xl rounded-2xl winter-panel p-6 text-[#edf2f6] shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs">
+      <div className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl winter-panel p-5 sm:p-6 text-[#edf2f6] shadow-2xl">
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 p-1.5 rounded-lg text-[#91a1b1] hover:text-white hover:bg-white/10 transition-colors"
+          className="absolute top-4 right-4 p-1.5 rounded-lg text-[#91a1b1] hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
 
         {/* Header */}
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-3 rounded-xl bg-[#e5c783]/20 text-[#e5c783] border border-[#e5c783]/30">
+        <div className="flex items-center gap-3 mb-4 pr-8">
+          <div className="p-3 rounded-xl bg-[#e5c783]/20 text-[#e5c783] border border-[#e5c783]/30 shrink-0">
             <Camera className="w-6 h-6" />
           </div>
           <div>
@@ -111,7 +231,7 @@ export const ImageExportModal: React.FC<Props> = ({
         </div>
 
         {/* Snapshot Viewport Preview */}
-        <div className="relative w-full h-64 bg-[#0d1723] rounded-xl overflow-hidden border border-white/10 flex items-center justify-center mb-5">
+        <div className="relative w-full h-56 sm:h-64 bg-[#0d1723] rounded-xl overflow-hidden border border-white/10 flex items-center justify-center mb-5">
           {previewUrl ? (
             <img
               src={previewUrl}
@@ -141,23 +261,10 @@ export const ImageExportModal: React.FC<Props> = ({
           <button
             onClick={handleDownload}
             disabled={!previewUrl || isExporting}
-            className={`flex-1 py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 font-bold text-xs transition-all cursor-pointer ${
-              downloadSuccess
-                ? 'bg-emerald-600 text-white'
-                : 'bg-gradient-to-r from-[#e5c783] to-[#f3dc9b] text-[#0d1723] hover:brightness-105 shadow-lg'
-            }`}
+            className="flex-1 py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 font-bold text-xs transition-all cursor-pointer bg-gradient-to-r from-[#e5c783] to-[#f3dc9b] text-[#0d1723] hover:brightness-105 shadow-lg"
           >
-            {downloadSuccess ? (
-              <>
-                <Check className="w-4 h-4" />
-                <span>Downloaded PNG!</span>
-              </>
-            ) : (
-              <>
-                <Download className="w-4 h-4" />
-                <span>{isExporting ? 'Exporting...' : 'Download High-Res PNG'}</span>
-              </>
-            )}
+            <Download className="w-4 h-4" />
+            <span>{isExporting ? 'Exporting...' : 'Download High-Res PNG'}</span>
           </button>
         </div>
       </div>

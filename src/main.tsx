@@ -23,7 +23,7 @@ function RootRouter() {
       const nextRoute = parsePublicRoute(window.location.pathname);
       setPublicRoute(nextRoute);
       if (!nextRoute) {
-        document.title = 'My Christmas World';
+        document.title = 'My Christmas World | Build with Magic';
       }
     };
     window.addEventListener('popstate', onPopState);
@@ -37,7 +37,7 @@ function RootRouter() {
     const nextRoute = parsePublicRoute(path);
     setPublicRoute(nextRoute);
     if (!nextRoute) {
-      document.title = 'My Christmas World';
+      document.title = 'My Christmas World | Build with Magic';
     }
   };
 
