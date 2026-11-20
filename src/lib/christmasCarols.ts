@@ -144,18 +144,41 @@ export class ChristmasMusicPlayer {
   }
 
   private initCtx() {
+    if (typeof window === 'undefined') return;
     if (!this.ctx) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {
-        this.ctx = new AudioCtx();
-        this.masterGain = this.ctx.createGain();
-        this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
-        this.masterGain.connect(this.ctx.destination);
+        try {
+          this.ctx = new AudioCtx();
+          this.masterGain = this.ctx.createGain();
+          this.masterGain.gain.setValueAtTime(
+            this.isMuted ? 0 : this.volume,
+            this.ctx.currentTime
+          );
+          this.masterGain.connect(this.ctx.destination);
+        } catch {
+          this.ctx = null;
+          this.masterGain = null;
+          return;
+        }
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      try {
+        const resumePromise = this.ctx.resume();
+        if (resumePromise && typeof resumePromise.catch === 'function') {
+          resumePromise.catch(() => {});
+        }
+      } catch {
+        // ignore until valid user gesture
+      }
     }
+  }
+
+  public unlock() {
+    this.initCtx();
   }
 
   public subscribe(listener: () => void) {
@@ -201,12 +224,34 @@ export class ChristmasMusicPlayer {
   }
 
   public play() {
+    this.isMuted = false;
     this.initCtx();
     if (!this.ctx) return;
+
+    if (this.masterGain) {
+      this.masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
+    }
 
     if (this.isPlaying) return;
     this.isPlaying = true;
     this.notify();
+
+    if (this.ctx.state === 'suspended') {
+      try {
+        this.ctx
+          .resume()
+          .then(() => {
+            if (this.isPlaying && !this.nextNoteTimeout) {
+              this.scheduleNextNote();
+            }
+          })
+          .catch(() => {});
+      } catch {
+        // Wait for next user gesture if resume throws synchronously
+      }
+      return;
+    }
+
     this.scheduleNextNote();
   }
 
@@ -256,6 +301,10 @@ export class ChristmasMusicPlayer {
 
   private scheduleNextNote() {
     if (!this.isPlaying || !this.ctx || !this.masterGain) return;
+    if (this.nextNoteTimeout) {
+      clearTimeout(this.nextNoteTimeout);
+      this.nextNoteTimeout = null;
+    }
 
     const track = FAMOUS_CAROLS[this.currentTrackIndex];
     if (this.currentNoteIndex >= track.notes.length) {

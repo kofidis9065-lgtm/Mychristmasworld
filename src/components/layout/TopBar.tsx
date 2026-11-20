@@ -172,9 +172,9 @@ export const TopBar: React.FC<Props> = ({
             <button
               onClick={handleToggleMusic}
               title={
-                musicState.isMuted
-                  ? 'Unmute Christmas Music (40s-60s Classics)'
-                  : `Playing: Vintage Christmas Classics (Click to Mute)`
+                !musicState.isMuted && musicState.isPlaying
+                  ? `Playing: ${musicState.title} (Click to Mute)`
+                  : 'Play Christmas Music'
               }
               className={`flex items-center gap-1 sm:gap-1.5 py-1.5 px-2 sm:px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-lg active:scale-95 shrink-0 ${
                 !musicState.isMuted && musicState.isPlaying

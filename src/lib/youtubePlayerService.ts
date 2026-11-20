@@ -1,6 +1,9 @@
-// YouTube Holiday Music Controller for:
-// https://www.youtube.com/watch?v=dBHic2n7lD8&list=RDdBHic2n7lD8&start_radio=1
-// "Greatest Vintage Christmas Classics Iconic 40s-60s Oldies | Legendary Holiday Music"
+import { christmasMusicPlayer } from './christmasCarols';
+
+// Background Holiday Music Controller
+// Plays embedded Vintage Christmas Classics via YouTube IFrame API with automatic
+// zero-dependency Web Audio Christmas Carols fallback when YouTube is blocked,
+// unavailable, or rejected by browser/iOS autoplay policies.
 
 declare global {
   interface Window {
@@ -22,13 +25,15 @@ class YouTubeAudioService {
   private isPlaying: boolean = false;
   private isMuted: boolean = false;
   private hasInteracted: boolean = false;
+  private wantsPlay: boolean = false;
   private listeners: (() => void)[] = [];
-  private fallbackAudio: HTMLAudioElement | null = null;
   private isUsingFallback: boolean = false;
+  private apiLoadFailed: boolean = false;
+  private playbackWatchdog: number | null = null;
 
-  private readonly VIDEO_ID = 'dBHic2n7lD8';
-  private readonly PLAYLIST_ID = 'RDdBHic2n7lD8';
-  private readonly TITLE = 'Vintage Christmas Classics (40s-60s)';
+  private readonly VIDEO_ID = '9Sf7hY7fWQI';
+  private readonly YOUTUBE_TITLE = 'Christmas Music No Ads Playlist';
+  private readonly FALLBACK_TITLE = 'Christmas Carols Radio';
 
   constructor() {
     this.init();
@@ -49,17 +54,28 @@ class YouTubeAudioService {
     return {
       isPlaying: this.isPlaying,
       isMuted: this.isMuted,
-      isReady: this.isReady,
-      title: this.TITLE,
+      isReady: this.isReady || this.isUsingFallback,
+      title: this.isUsingFallback ? this.FALLBACK_TITLE : this.YOUTUBE_TITLE,
     };
   }
 
   private init() {
     if (typeof window === 'undefined') return;
 
-    // Listen for first valid iOS Safari user activation to satisfy autoplay policies
+    christmasMusicPlayer.subscribe(() => {
+      if (!this.isUsingFallback) return;
+      const carolState = christmasMusicPlayer.getState();
+      const nextPlaying = carolState.isPlaying && !carolState.isMuted && !this.isMuted;
+      if (this.isPlaying !== nextPlaying) {
+        this.isPlaying = nextPlaying;
+        this.notify();
+      }
+    });
+
+    // Listen for first valid user activation to satisfy iOS Safari / Chromium autoplay policies
     const handleFirstGesture = () => {
       this.hasInteracted = true;
+      christmasMusicPlayer.unlock();
       if (!this.isMuted && !this.isPlaying) {
         this.play();
       }
@@ -72,7 +88,6 @@ class YouTubeAudioService {
     window.addEventListener('click', handleFirstGesture, { once: true, passive: true });
     window.addEventListener('keydown', handleFirstGesture, { once: true, passive: true });
 
-    // Load YouTube IFrame API script
     this.loadYouTubeApi();
   }
 
@@ -92,6 +107,13 @@ class YouTubeAudioService {
       const tag = document.createElement('script');
       tag.id = 'yt-iframe-api-script';
       tag.src = 'https://www.youtube.com/iframe_api';
+      tag.async = true;
+      tag.onerror = () => {
+        this.apiLoadFailed = true;
+        if (this.wantsPlay && !this.isMuted) {
+          this.activateAudioFallback();
+        }
+      };
       const firstScriptTag = document.getElementsByTagName('script')[0];
       if (firstScriptTag?.parentNode) {
         firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
@@ -102,20 +124,23 @@ class YouTubeAudioService {
   }
 
   private mountPlayer() {
-    if (this.player || typeof document === 'undefined') return;
+    if (this.player || this.isUsingFallback || typeof document === 'undefined') return;
 
     let container = document.getElementById('youtube-bg-audio-container');
     if (!container) {
       container = document.createElement('div');
       container.id = 'youtube-bg-audio-container';
+      container.setAttribute('aria-hidden', 'true');
+      // YouTube IFrame API requires >= 200x113 in-viewport to permit playback reliably
       container.style.position = 'fixed';
-      container.style.bottom = '-9999px';
-      container.style.left = '-9999px';
+      container.style.bottom = '0';
+      container.style.right = '0';
       container.style.width = '200px';
       container.style.height = '120px';
-      container.style.opacity = '0.001';
+      container.style.opacity = '0.01';
       container.style.pointerEvents = 'none';
-      container.style.zIndex = '-9999';
+      container.style.overflow = 'hidden';
+      container.style.zIndex = '-1';
       document.body.appendChild(container);
     }
 
@@ -129,65 +154,110 @@ class YouTubeAudioService {
         width: '200',
         videoId: this.VIDEO_ID,
         playerVars: {
-          autoplay: 1,
+          autoplay: 0,
           loop: 1,
           playlist: this.VIDEO_ID,
-          list: this.PLAYLIST_ID,
           controls: 0,
           showinfo: 0,
           rel: 0,
           modestbranding: 1,
           playsinline: 1,
           enablejsapi: 1,
+          origin: window.location.origin,
         },
         events: {
           onReady: (event: any) => {
             this.isReady = true;
+            if (this.isUsingFallback || this.isMuted) {
+              this.notify();
+              return;
+            }
             try {
               event.target.setVolume(85);
-              if (!this.isMuted && this.hasInteracted) {
-                this.stopFallbackAudio();
+              if (this.wantsPlay && this.hasInteracted && !this.isMuted) {
+                event.target.unMute?.();
                 event.target.playVideo();
-                this.isPlaying = true;
+                this.armPlaybackWatchdog(3500);
               }
-            } catch (err) {
-              console.warn('YouTube onReady autoplay notice:', err);
+            } catch {
+              if (this.wantsPlay && !this.isMuted) {
+                this.activateAudioFallback();
+              }
             }
             this.notify();
           },
           onStateChange: (event: any) => {
             // YT.PlayerState: 1 = PLAYING, 2 = PAUSED, 0 = ENDED, 3 = BUFFERING
             if (event.data === 1) {
-              this.stopFallbackAudio();
+              if (this.isMuted || !this.wantsPlay || this.isUsingFallback) {
+                try {
+                  this.player?.pauseVideo?.();
+                } catch {
+                  // ignore
+                }
+                return;
+              }
+              this.clearPlaybackWatchdog();
               this.isPlaying = true;
-              this.isUsingFallback = false;
+              this.notify();
+            } else if (event.data === 3) {
+              if (!this.isUsingFallback && this.wantsPlay && !this.isMuted) {
+                this.armPlaybackWatchdog(4500);
+              }
             } else if (event.data === 2) {
               if (!this.isUsingFallback) {
                 this.isPlaying = false;
+                this.notify();
               }
             } else if (event.data === 0) {
-              // Loop back to beginning of vintage holiday playlist
-              this.player?.playVideo();
+              if (!this.isUsingFallback && !this.isMuted && this.wantsPlay) {
+                try {
+                  this.player?.playVideo?.();
+                } catch {
+                  this.activateAudioFallback();
+                }
+              }
             }
-            this.notify();
           },
-          onError: (err: any) => {
-            console.warn('YouTube Player notice, enabling audio fallback:', err);
-            this.activateAudioFallback();
+          onError: () => {
+            this.clearPlaybackWatchdog();
+            if (!this.isMuted && this.wantsPlay) {
+              this.activateAudioFallback();
+            } else {
+              this.isUsingFallback = true;
+              this.notify();
+            }
           },
         },
       });
-    } catch (err) {
-      console.warn('Could not instantiate YouTube player, using fallback:', err);
+    } catch {
       this.activateAudioFallback();
     }
   }
 
-  private stopFallbackAudio() {
-    this.isUsingFallback = false;
-    if (this.fallbackAudio) {
+  private armPlaybackWatchdog(delayMs: number = 3500) {
+    this.clearPlaybackWatchdog();
+    if (typeof window === 'undefined') return;
+    this.playbackWatchdog = window.setTimeout(() => {
+      this.playbackWatchdog = null;
+      if (this.wantsPlay && !this.isMuted && !this.isPlaying) {
+        this.activateAudioFallback();
+      }
+    }, delayMs);
+  }
+
+  private clearPlaybackWatchdog() {
+    if (this.playbackWatchdog !== null) {
+      window.clearTimeout(this.playbackWatchdog);
+      this.playbackWatchdog = null;
+    }
+  }
+
+  private stopYouTubeSilently() {
+    if (this.player) {
       try {
-        this.fallbackAudio.pause();
+        if (typeof this.player.mute === 'function') this.player.mute();
+        if (typeof this.player.pauseVideo === 'function') this.player.pauseVideo();
       } catch {
         // ignore
       }
@@ -195,97 +265,95 @@ class YouTubeAudioService {
   }
 
   private activateAudioFallback() {
+    this.clearPlaybackWatchdog();
+    this.stopYouTubeSilently();
     this.isUsingFallback = true;
-    if (!this.fallbackAudio) {
-      this.fallbackAudio = new Audio(
-        'https://ia801309.us.archive.org/34/items/JingleBells_659/JingleBells.mp3'
-      );
-      this.fallbackAudio.loop = true;
-      this.fallbackAudio.preload = 'none';
-      this.fallbackAudio.volume = 0.5;
+
+    if (!this.isMuted && this.wantsPlay) {
+      christmasMusicPlayer.play();
+      const carolState = christmasMusicPlayer.getState();
+      this.isPlaying = carolState.isPlaying;
+    } else {
+      this.isPlaying = false;
     }
-    if (!this.isMuted) {
-      this.fallbackAudio.muted = false;
-      this.fallbackAudio.play().then(() => {
-        this.isPlaying = true;
-        this.notify();
-      }).catch(() => {});
-    }
+    this.notify();
   }
 
   public play() {
+    this.hasInteracted = true;
     this.isMuted = false;
-    if (this.isUsingFallback && this.fallbackAudio) {
-      this.fallbackAudio.muted = false;
-      this.fallbackAudio.play().then(() => {
-        this.isPlaying = true;
-        this.notify();
-      }).catch(() => {});
+    this.wantsPlay = true;
+
+    // Synchronously unlock Web Audio inside user gesture so fallback works reliably on iOS Safari
+    christmasMusicPlayer.unlock();
+
+    if (this.isUsingFallback || this.apiLoadFailed) {
+      this.isUsingFallback = true;
+      christmasMusicPlayer.play();
+      this.isPlaying = christmasMusicPlayer.getState().isPlaying;
+      this.notify();
       return;
     }
 
-    if (this.player && typeof this.player.playVideo === 'function') {
+    if (this.isReady && this.player && typeof this.player.playVideo === 'function') {
       try {
-        this.stopFallbackAudio();
-        this.player.unMute();
+        christmasMusicPlayer.pause();
+        this.player.unMute?.();
+        this.player.setVolume?.(85);
         this.player.playVideo();
-        this.isPlaying = true;
+        // Verify playback actually starts; otherwise fall back to built-in Christmas Carols
+        this.armPlaybackWatchdog(3500);
         this.notify();
-      } catch (err) {
-        console.warn('playVideo notice:', err);
+      } catch {
+        this.activateAudioFallback();
       }
     } else {
-      this.activateAudioFallback();
+      // YouTube player is still initializing; fall back if it fails to start
+      this.armPlaybackWatchdog(4500);
+      this.notify();
     }
   }
 
   public pause() {
+    this.wantsPlay = false;
+    this.clearPlaybackWatchdog();
     this.isPlaying = false;
-    if (this.fallbackAudio) {
-      this.fallbackAudio.pause();
-    }
+    christmasMusicPlayer.pause();
     if (this.player && typeof this.player.pauseVideo === 'function') {
       try {
         this.player.pauseVideo();
-      } catch {}
+      } catch {
+        // ignore
+      }
     }
     this.notify();
   }
 
   public toggleMute() {
+    // If music hasn't started playing yet (UI displays "Muted"), clicking should start playback
+    if (!this.isMuted && !this.isPlaying) {
+      this.play();
+      return;
+    }
+
     this.isMuted = !this.isMuted;
     if (this.isMuted) {
-      if (this.fallbackAudio) {
-        this.fallbackAudio.muted = true;
-        this.fallbackAudio.pause();
-      }
+      this.wantsPlay = false;
+      this.clearPlaybackWatchdog();
+      christmasMusicPlayer.pause();
       if (this.player) {
         try {
           if (typeof this.player.mute === 'function') this.player.mute();
           if (typeof this.player.pauseVideo === 'function') this.player.pauseVideo();
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
       this.isPlaying = false;
+      this.notify();
     } else {
-      if (this.isUsingFallback && this.fallbackAudio) {
-        this.fallbackAudio.muted = false;
-        this.fallbackAudio.play().then(() => {
-          this.isPlaying = true;
-          this.notify();
-        }).catch(() => {});
-      } else if (this.player) {
-        try {
-          if (typeof this.player.unMute === 'function') this.player.unMute();
-          if (typeof this.player.playVideo === 'function') this.player.playVideo();
-          this.isPlaying = true;
-        } catch {
-          this.activateAudioFallback();
-        }
-      } else {
-        this.activateAudioFallback();
-      }
+      this.play();
     }
-    this.notify();
   }
 }
 
